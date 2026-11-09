@@ -1,5 +1,7 @@
-import { AudioWaveform, Thermometer } from 'lucide-react'
+import { AudioWaveform, Monitor, Moon, Sun, Thermometer } from 'lucide-react'
+import Menu from './ui/Menu.jsx'
 import Tooltip from './ui/Tooltip.jsx'
+import { useTheme } from '../hooks/useTheme.js'
 import { cn } from '../lib/cn.js'
 
 const HOT_C = 83
@@ -12,6 +14,7 @@ function shortGpu(name = '') {
 function HealthPill({ health, connected }) {
   let dot = 'bg-neutral-300 dark:bg-neutral-600'
   let text = 'Conectando…'
+  let prefix = '' // nombre de la GPU: se oculta en pantallas angostas
   let pulse = false
   let tip = null
   const gpu = health?.gpu
@@ -27,7 +30,8 @@ function HealthPill({ health, connected }) {
     const name = shortGpu(gpu.name)
     pulse = gpu.busy
     dot = gpu.busy ? 'bg-neutral-900 dark:bg-white' : 'bg-emerald-500'
-    text = `${name} · ${gpu.busy ? 'Procesando' : 'Libre'}`
+    prefix = `${name} · `
+    text = gpu.busy ? 'Procesando' : 'Libre'
     tip = `${gpu.name} · ${gpu.vramGB} GB${Number.isFinite(gpu.tempC) ? ` · ${gpu.tempC} °C` : ''}`
   }
   if (health && !health.ffmpeg) tip = 'Falta ffmpeg en el servidor'
@@ -40,10 +44,43 @@ function HealthPill({ health, connected }) {
         className="focus-ring inline-flex h-9 items-center gap-2 rounded-full border border-neutral-200 bg-white px-3.5 text-[13px] font-medium text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200"
       >
         <span className={cn('h-2 w-2 rounded-full transition-colors', dot, pulse && 'animate-pulse-dot')} aria-hidden />
-        <span className="whitespace-nowrap">{text}</span>
+        <span className="whitespace-nowrap">
+          {prefix && <span className="hidden sm:inline">{prefix}</span>}
+          {text}
+        </span>
         {hot && <Thermometer size={14} className="text-red-600" aria-label={`${gpu.tempC} °C`} />}
       </span>
     </Tooltip>
+  )
+}
+
+const THEMES = [
+  { key: 'system', label: 'Sistema', hint: 'Igual que tu computadora', icon: Monitor },
+  { key: 'light', label: 'Claro', icon: Sun },
+  { key: 'dark', label: 'Oscuro', icon: Moon },
+]
+
+function ThemeMenu() {
+  const { theme, setTheme } = useTheme()
+  const current = THEMES.find((t) => t.key === theme) ?? THEMES[0]
+  const Icon = current.icon
+  return (
+    <Menu
+      label="Tema"
+      align="end"
+      items={THEMES.map((t) => ({ ...t, selected: t.key === theme, onSelect: () => setTheme(t.key) }))}
+      trigger={({ props }) => (
+        <button
+          type="button"
+          {...props}
+          aria-label={`Tema: ${current.label}`}
+          title={`Tema: ${current.label}`}
+          className="focus-ring grid h-9 w-9 place-items-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
+        >
+          <Icon size={16} aria-hidden />
+        </button>
+      )}
+    />
   )
 }
 
@@ -61,7 +98,7 @@ export default function Header({ health, connected, mock, queued }) {
           <Tooltip content="Sin backend: los datos son simulados">
             <span
               tabIndex={0}
-              className="focus-ring rounded-full border border-dashed border-neutral-300 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500 dark:border-neutral-700"
+              className="focus-ring hidden rounded-full border border-dashed border-neutral-300 px-2 py-0.5 min-[400px]:inline text-[11px] font-medium uppercase tracking-wide text-neutral-500 dark:border-neutral-700"
             >
               Demo
             </span>
@@ -74,6 +111,7 @@ export default function Header({ health, connected, mock, queued }) {
             </span>
           )}
           <HealthPill health={health} connected={connected} />
+          <ThemeMenu />
         </div>
       </div>
     </header>

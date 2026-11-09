@@ -20,6 +20,7 @@ Powered by the open-source [Resemble Enhance](https://github.com/resemble-ai/res
 - **Compare before and after.** A waveform player switches between *Original* and *Enhanced* at the same position.
 - **Download** the result as MP3 or WAV.
 - **Notifications** when a job finishes.
+- **Light and dark themes**, following your system or chosen from the header.
 - **Optional sharing.** Let a few trusted people use your GPU through a secret link, with nothing to install on their side ([details](#share-your-local-setup)).
 
 ![Comparing original and enhanced audio](docs/images/player.png)

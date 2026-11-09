@@ -9,7 +9,7 @@ It talks to the server (`../server`) through the contract in [`../docs/API.md`](
 ## Stack
 
 - **Vite 6 + React 18**, plain JavaScript (`.jsx`).
-- **Tailwind CSS 3**, with automatic dark mode (`prefers-color-scheme`).
+- **Tailwind CSS 3**, with light and dark themes (System / Light / Dark menu in the header; `darkMode: 'class'`).
 - Icons from `lucide-react`; Inter font with a `system-ui` fallback.
 - No state or UI libraries: `useReducer`, custom hooks, and hand-made modals, menus and toasts.
 
@@ -73,7 +73,7 @@ Minimal black and white:
 
 - Light gray background with white `rounded-2xl` cards.
 - A black primary color, plus one accent each for errors (red) and success (green).
-- Dark mode inverts the palette.
+- Dark mode inverts the palette. The theme follows the operating system by default; the header menu can force light or dark, and the choice is remembered in the browser.
 
 ## Structure
 
