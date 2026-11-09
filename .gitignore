@@ -1,0 +1,29 @@
+# Python / modelo (pesados, se instalan con scripts/setup.sh)
+venv/
+modelos/
+__pycache__/
+*.pyc
+
+# Datos de usuario y restos de pruebas
+data/
+prueba/
+salidas/
+trabajos/
+*.wav
+*.mp3
+
+# Node
+node_modules/
+dist/
+web/public/mock/*.mp3
+web/public/mock/*.json
+!web/public/mock/.gitkeep
+
+# Sistema
+.DS_Store
+*.log
+.env
+
+# Notas locales (no se versionan)
+CLAUDE.md
+docs/plan-original-fases.md

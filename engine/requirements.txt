@@ -1,0 +1,4 @@
+# Instalar torch con CUDA primero:
+#   pip install torch==2.1.1 torchaudio==2.1.1 torchvision==0.16.1 --index-url https://download.pytorch.org/whl/cu121
+resemble-enhance==0.0.1
+huggingface_hub
