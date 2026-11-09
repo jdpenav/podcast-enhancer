@@ -51,6 +51,26 @@ Powered by the open-source [Resemble Enhance](https://github.com/resemble-ai/res
 
 No GPU? It still runs on CPU, just much slower.
 
+### On macOS?
+
+Processing audio is **not supported on macOS yet**:
+
+- The engine relies on CUDA, which requires an NVIDIA GPU (Macs don't have one).
+- The server's process tracking uses Linux's `/proc`.
+- One of the model's dependencies (`deepspeed`) usually fails to install on macOS.
+
+What you can do on a Mac:
+
+- **Try the interface** with fake data. It only needs Node.js 20+:
+  ```bash
+  git clone https://github.com/jdpenav/podcast-enhancer.git
+  cd podcast-enhancer/web
+  npm install
+  npm run dev:mock      # open http://localhost:5173/?escenario=completo
+  ```
+- **Use someone else's GPU.** If a friend runs Enhancer on Windows or Linux, they can [share it](#share-your-local-setup) with you. You only need a browser.
+- **Run it on a Linux machine** with an NVIDIA GPU (a desktop, or a cloud GPU instance) and open it from your Mac.
+
 ### Install and run
 
 ```bash
