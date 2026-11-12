@@ -9,7 +9,7 @@ import { sendFile } from '../static.js'
 const AUDIO = new Set(['original', 'result.mp3', 'result.wav'])
 
 /** Content-Disposition con nombre UTF-8 (RFC 6266/5987) y respaldo ASCII. */
-function attachment(name) {
+export function attachment(name) {
   const ascii = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '')
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`
 }

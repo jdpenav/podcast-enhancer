@@ -96,24 +96,116 @@ export function downloadUrl(job, format) {
   return `${base}?download=1`
 }
 
+// ---------------------------------------------------------------------------
+// Eventos en vivo
+// ---------------------------------------------------------------------------
+const SSE_EVENTS = {
+  job: 'onJob',
+  progress: 'onProgress',
+  deleted: 'onDeleted',
+  health: 'onHealth',
+  episode: 'onEpisode',
+  episodeProgress: 'onEpisodeProgress',
+  episodeDeleted: 'onEpisodeDeleted',
+  library: 'onLibrary',
+}
+let shared = null // { es, subs: Set<handlers> }
+
 /**
- * Suscripción al SSE /api/events. EventSource reconecta solo.
- * @returns {() => void} función para cerrar
+ * Suscripción al SSE /api/events. Todas las suscripciones comparten UNA conexión
+ * (se abre con la primera y se cierra con la última). EventSource reconecta solo.
+ * handlers: { onJob, onProgress, onDeleted, onHealth, onEpisode, onEpisodeProgress, onEpisodeDeleted, onLibrary, onOpen, onError }
+ * @returns {() => void} función para cancelar la suscripción
  */
-export function subscribeEvents({ onJob, onProgress, onDeleted, onHealth, onOpen, onError }) {
-  const es = new EventSource(`${BASE}/events`)
-  const parse = (fn) => (e) => {
-    try {
-      fn?.(JSON.parse(e.data))
-    } catch (err) {
-      console.warn('Evento SSE inválido', err)
+export function subscribeEvents(handlers) {
+  if (!shared) {
+    const es = new EventSource(`${BASE}/events`)
+    const subs = new Set()
+    for (const [event, key] of Object.entries(SSE_EVENTS)) {
+      es.addEventListener(event, (e) => {
+        let data
+        try {
+          data = JSON.parse(e.data)
+        } catch (err) {
+          return console.warn('Evento SSE inválido', err)
+        }
+        for (const s of subs) s[key]?.(data)
+      })
+    }
+    es.onopen = () => subs.forEach((s) => s.onOpen?.())
+    es.onerror = () => subs.forEach((s) => s.onError?.())
+    shared = { es, subs }
+  }
+  const mine = shared
+  mine.subs.add(handlers)
+  if (mine.es.readyState === EventSource.OPEN) queueMicrotask(() => handlers.onOpen?.())
+  return () => {
+    mine.subs.delete(handlers)
+    if (!mine.subs.size) {
+      mine.es.close()
+      if (shared === mine) shared = null
     }
   }
-  es.addEventListener('job', parse(onJob))
-  es.addEventListener('progress', parse(onProgress))
-  es.addEventListener('deleted', parse(onDeleted))
-  es.addEventListener('health', parse(onHealth))
-  es.onopen = () => onOpen?.()
-  es.onerror = () => onError?.()
-  return () => es.close()
 }
+
+// ---------------------------------------------------------------------------
+// Biblioteca (episodios)
+// ---------------------------------------------------------------------------
+export function listEpisodes({ status, q, source } = {}) {
+  const qs = new URLSearchParams()
+  if (status) qs.set('status', status)
+  if (q) qs.set('q', q)
+  if (source) qs.set('source', source)
+  const s = qs.toString()
+  return request(`/episodes${s ? `?${s}` : ''}`)
+}
+export const getEpisode = (id) => request(`/episodes/${id}`)
+export const renameEpisode = (id, title) => request(`/episodes/${id}`, { method: 'PATCH', body: { title } })
+export const syncEpisodes = ({ full = true } = {}) => request('/episodes/sync', { method: 'POST', body: { full } })
+export const downloadEpisode = (id) => request(`/episodes/${id}/download`, { method: 'POST' })
+export const retryEpisode = (id) => request(`/episodes/${id}/retry`, { method: 'POST' })
+export const cancelEpisode = (id) => request(`/episodes/${id}/cancel`, { method: 'POST' })
+export const deleteEpisode = (id) => request(`/episodes/${id}`, { method: 'DELETE' })
+export const getEpisodePeaks = (id) => request(`/episodes/${id}/peaks`)
+export const saveEpisodeEdit = (id, state) => request(`/episodes/${id}/edit`, { method: 'PUT', body: state })
+export const exportEpisode = (id) => request(`/episodes/${id}/export`, { method: 'POST' })
+
+/** Mejorar un audio de la biblioteca (crea un Job normal). */
+export const createJobFromEpisode = (episodeId, { mode, quality }) =>
+  request('/jobs', { method: 'POST', body: { episodeId, mode, ...(mode === 'enhance' && quality ? { quality } : {}) } })
+
+/** which: 'source' | 'enhanced' | 'enhanced.wav' | 'final' */
+export function episodeAudioUrl(ep, which) {
+  return `${BASE}/episodes/${ep.id}/audio/${which}`
+}
+export const episodeDownloadUrl = (ep, which) => `${episodeAudioUrl(ep, which)}?download=1`
+
+// ---------------------------------------------------------------------------
+// Cortinas
+// ---------------------------------------------------------------------------
+export const listAssets = () => request('/assets')
+export const renameAsset = (id, name) => request(`/assets/${id}`, { method: 'PATCH', body: { name } })
+export const deleteAsset = (id) => request(`/assets/${id}`, { method: 'DELETE' })
+export const setAssetDefaults = (defaults) => request('/assets/defaults', { method: 'PUT', body: defaults })
+export const assetAudioUrl = (asset) => asset.url
+
+export function uploadAsset(file, name) {
+  const form = new FormData()
+  if (name) form.append('name', name)
+  form.append('file', file, file.name)
+  return fetch(`${BASE}/assets`, { method: 'POST', body: form })
+    .catch(() => {
+      throw new ApiError('No se pudo conectar con el servidor.', { code: 'NETWORK' })
+    })
+    .then(async (res) => {
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new ApiError(data?.error?.message || `No se pudo subir (${res.status}).`, { code: data?.error?.code, status: res.status })
+      return data
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Sistema
+// ---------------------------------------------------------------------------
+export const getSystem = () => request('/system')
+export const updateYtdlp = () => request('/system/yt-dlp/update', { method: 'POST' })

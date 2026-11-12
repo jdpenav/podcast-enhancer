@@ -17,9 +17,12 @@ import { deleteJobRow, getJob, jobsWithPid, jobsByStatus, nextPending, updateJob
 import { isAlive, listEngines, readArgv, isEngineArgv, stopEngine } from './procs.js'
 import { broadcast } from './events.js'
 import { getWaveform } from './waveform.js'
+import { HttpError } from './errors.js'
+import { log } from './log.js'
+
+export { HttpError, log }
 
 const now = () => new Date().toISOString()
-export const log = (...a) => console.log(new Date().toLocaleTimeString('es'), ...a)
 
 /** Trabajo en curso: { id, pid, child, intent, runStartMs, activeBefore, lastError, sawDone, exited: Promise } */
 let current = null
@@ -29,21 +32,24 @@ let shuttingDown = false
 export const isBusy = () => !!current || externalEngines > 0
 export const currentJobId = () => current?.id ?? null
 
+/**
+ * Ganchos para la biblioteca: se llaman cada vez que un trabajo cambia de estado o se borra.
+ * (library.js los registra; así queue.js no depende de los episodios.)
+ */
+export const jobHooks = { onChange: null, onRemove: null }
+
 function emitJob(job) {
   broadcast('job', toApi(job), job.owner)
+  try {
+    jobHooks.onChange?.(job)
+  } catch (e) {
+    log(`gancho de biblioteca falló (${job.id}): ${e.message}`)
+  }
   return job
 }
 
 function setStatus(id, patch) {
   return emitJob(updateJob(id, patch))
-}
-
-export class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message)
-    this.statusCode = status
-    this.code = code
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +243,7 @@ export async function remove(id) {
   await fs.rm(files(job).dir, { recursive: true, force: true })
   deleteJobRow(id)
   broadcast('deleted', { id }, job.owner)
+  jobHooks.onRemove?.(job)
 }
 
 function mustGet(id) {

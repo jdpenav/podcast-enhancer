@@ -5,7 +5,7 @@ import { cn } from '../../lib/cn.js'
 /**
  * Menú desplegable accesible (role="menu").
  * - `trigger`: función ({ open, toggle, props }) que renderiza el botón; hay que esparcir `props` en él.
- * - items: [{ key, label, hint?, icon?, href?, download?, selected?, onSelect? }]
+ * - items: [{ key, label, hint?, icon?, href?, download?, target?, selected?, onSelect? }]
  * - `placement`: 'bottom' | 'top'; `align`: 'start' | 'end'.
  */
 export default function Menu({ trigger, items, placement = 'bottom', align = 'start', label }) {
@@ -106,6 +106,8 @@ export default function Menu({ trigger, items, placement = 'bottom', align = 'st
                 role="menuitem"
                 href={item.href}
                 download={item.download}
+                target={item.target}
+                rel={item.target ? 'noreferrer' : undefined}
                 onClick={() => select(item)}
                 className={cls}
               >

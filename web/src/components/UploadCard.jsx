@@ -1,9 +1,12 @@
 import { useRef } from 'react'
-import { Upload } from 'lucide-react'
+import { Library, Upload } from 'lucide-react'
 import Button from './ui/Button.jsx'
 
-/** Zona para elegir/soltar audios. El soltar funciona en toda la ventana (ver DropOverlay). */
-export default function UploadCard({ config, onFiles }) {
+/**
+ * Zona para elegir/soltar audios. El soltar funciona en toda la ventana (ver DropOverlay).
+ * `onPickLibrary`: abre el selector de la biblioteca (audios ya descargados o subidos).
+ */
+export default function UploadCard({ config, onFiles, onPickLibrary }) {
   const inputRef = useRef(null)
   const types = config?.acceptedTypes ?? []
   const typesLabel = types.map((t) => t.slice(1).toUpperCase()).join(', ')
@@ -26,15 +29,28 @@ export default function UploadCard({ config, onFiles }) {
             {config ? `${typesLabel} · hasta ${config.maxUploadMB} MB${config.role === 'guest' ? ' (mejor en MP3)' : ''}` : 'Cargando formatos…'}
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={(e) => {
-            e.stopPropagation()
-            open()
-          }}
-        >
-          Elegir archivo
-        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            variant="primary"
+            onClick={(e) => {
+              e.stopPropagation()
+              open()
+            }}
+          >
+            Elegir archivo
+          </Button>
+          {onPickLibrary && (
+            <Button
+              icon={Library}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPickLibrary()
+              }}
+            >
+              Elegir de la biblioteca
+            </Button>
+          )}
+        </div>
       </div>
       <input
         ref={inputRef}

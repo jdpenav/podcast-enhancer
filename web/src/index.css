@@ -25,6 +25,25 @@
   }
 }
 
+/* Editor (wavesurfer usa shadow DOM: se estiliza con ::part) */
+#editor-wave ::part(region-handle) {
+  width: 6px !important;
+  border: none !important;
+  background: rgba(220, 38, 38, 0.75);
+  border-radius: 3px;
+}
+#editor-wave ::part(region-handle-left) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+#editor-wave ::part(region-handle-right) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+#editor-wave ::part(scroll) {
+  scrollbar-width: thin;
+}
+
 /* Respeta "reducir movimiento" del sistema */
 @media (prefers-reduced-motion: reduce) {
   *,

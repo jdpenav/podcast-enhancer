@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, Gauge, Keyboard } from 'lucide-react'
+import { ChevronDown, Gauge, Keyboard, Scissors } from 'lucide-react'
 import Modal from './ui/Modal.jsx'
 import Button from './ui/Button.jsx'
 import Menu from './ui/Menu.jsx'
@@ -35,7 +35,7 @@ function usePeaks(api, jobId, which) {
 }
 
 /** Escuchar el resultado, comparar con el original y descargar. */
-export default function ResultModal({ job, api, mock, onClose }) {
+export default function ResultModal({ job, api, mock, onClose, onEdit }) {
   const [active, setActive] = useState('result')
   const [rate, setRate] = useState(1)
   const open = !!job
@@ -100,6 +100,11 @@ export default function ResultModal({ job, api, mock, onClose }) {
             )}
           />
           <DownloadMenu job={shown} api={api} placement="top" align="end" />
+          {onEdit && shown.episodeId && (
+            <Button variant="primary" icon={Scissors} onClick={() => onEdit(shown)}>
+              Editar y exportar
+            </Button>
+          )}
         </div>
 
         <p className="hidden items-center justify-center gap-1.5 text-xs text-neutral-400 sm:flex dark:text-neutral-500">

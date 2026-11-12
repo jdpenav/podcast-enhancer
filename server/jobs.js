@@ -50,6 +50,7 @@ export function toApi(job) {
         ? { mp3: `/api/jobs/${job.id}/audio/result.mp3`, wav: `/api/jobs/${job.id}/audio/result.wav` }
         : null,
     guest: job.owner && job.owner !== 'local' ? job.owner : null,
+    episodeId: job.episodeId ?? null,
   }
 }
 

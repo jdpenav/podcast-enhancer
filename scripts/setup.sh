@@ -88,7 +88,42 @@ if [[ $CHECK -eq 1 && -d node_modules/better-sqlite3 ]]; then
     || todo "better-sqlite3 no carga con esta versión de Node: ejecuta 'npm rebuild better-sqlite3'"
 fi
 
-step "5. Carpeta de datos"
+step "5. yt-dlp (descargas del canal de YouTube)"
+# Ejecutable oficial standalone para Linux: trae su propio Python (yt-dlp exige Python >= 3.11 y el
+# sistema tiene 3.10, fijo por el motor). Queda en tools/bin/: sin sudo y sin tocar venv/.
+# Se actualiza desde la app (Ajustes → Actualizar) o con: tools/bin/yt-dlp -U
+YTDLP="$ROOT/tools/bin/yt-dlp"
+case "$(uname -m)" in
+  x86_64) YTDLP_ASSET="yt-dlp_linux" ;;
+  aarch64 | arm64) YTDLP_ASSET="yt-dlp_linux_aarch64" ;;
+  *) YTDLP_ASSET="" ;;
+esac
+install_ytdlp() {
+  [[ -n "$YTDLP_ASSET" ]] || { err "No hay ejecutable de yt-dlp para $(uname -m)"; return 1; }
+  local base="https://github.com/yt-dlp/yt-dlp/releases/latest/download"
+  local tmp; tmp="$(mktemp -d)"
+  curl -fsSL --retry 2 -o "$tmp/$YTDLP_ASSET" "$base/$YTDLP_ASSET" &&
+    curl -fsSL --retry 2 -o "$tmp/SHA2-256SUMS" "$base/SHA2-256SUMS" &&
+    (cd "$tmp" && grep -E " $YTDLP_ASSET\$" SHA2-256SUMS | sha256sum -c --quiet -) &&
+    chmod +x "$tmp/$YTDLP_ASSET" &&
+    "$tmp/$YTDLP_ASSET" --version >/dev/null &&
+    mkdir -p "$(dirname "$YTDLP")" && install -m 755 "$tmp/$YTDLP_ASSET" "$YTDLP"
+  local rc=$?
+  rm -rf "$tmp"
+  [[ $rc -eq 0 ]] || { err "No se pudo descargar, verificar o ejecutar yt-dlp"; return 1; }
+}
+if [[ -x "$YTDLP" ]] && "$YTDLP" --version >/dev/null 2>&1; then
+  ok "yt-dlp $("$YTDLP" --version) (tools/bin/yt-dlp)"
+elif command -v yt-dlp >/dev/null && yt-dlp --version >/dev/null 2>&1; then
+  ok "yt-dlp $(yt-dlp --version) ($(command -v yt-dlp))"
+else
+  [[ -e "$YTDLP" ]] && todo "tools/bin/yt-dlp existe pero no arranca: se reemplaza"
+  need "descargar yt-dlp ($YTDLP_ASSET, verificado con SHA-256)" install_ytdlp
+fi
+# YouTube exige un runtime de JavaScript: yt-dlp usa deno si existe; si no, la app le pasa este Node
+if command -v deno >/dev/null; then ok "deno (runtime de JS para YouTube)"; else ok "runtime de JS para YouTube: Node $(node -v)"; fi
+
+step "6. Carpeta de datos"
 if [[ -d data ]]; then ok "data/ existe"; else need "crear data/" mkdir -p data/jobs; fi
 
 echo

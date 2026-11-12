@@ -16,6 +16,12 @@ import { isBusy, kick, log, recover, shutdown, tick } from './queue.js'
 import systemRoutes from './routes/system.js'
 import jobRoutes from './routes/jobs.js'
 import audioRoutes from './routes/audio.js'
+import episodeRoutes from './routes/episodes.js'
+import assetRoutes from './routes/assets.js'
+import { initLibrary, stopLibrary } from './library.js'
+import { shutdownTasks } from './tasks.js'
+import { ytdlpVersion } from './ytdlp.js'
+import { hasFfmpeg } from './health.js'
 import { registerWebDist } from './static.js'
 import { guestAuth } from './share.js'
 
@@ -68,6 +74,8 @@ async function buildApp(role) {
   await app.register(systemRoutes)
   await app.register(jobRoutes)
   await app.register(audioRoutes)
+  await app.register(episodeRoutes)
+  await app.register(assetRoutes)
   if (serveWeb) registerWebDist(app, WEB_DIST)
   return app
 }
@@ -101,6 +109,14 @@ async function cleanupDisk() {
 
 await recover()
 await cleanupDisk()
+await initLibrary()
+
+// Herramientas externas: avisar claro al arrancar si falta algo (la app arranca igual)
+if (!(await hasFfmpeg())) log('⚠ Falta ffmpeg: sudo apt install ffmpeg')
+const yt = await ytdlpVersion()
+if (yt.installed) log(`yt-dlp ${yt.version} (${yt.path})`)
+else if (yt.path) log(`⚠ yt-dlp no arranca (${yt.path}): ${yt.error}. Reinstálalo con: npm run setup`)
+else log('⚠ Falta yt-dlp: la biblioteca no podrá listar ni descargar de YouTube. Instálalo con: npm run setup')
 
 // Health por SSE cada ~10 s (y revisión de motores externos)
 const healthTimer = setInterval(async () => {
@@ -123,7 +139,8 @@ async function stop(sig) {
   stopping = true
   log(`${sig}: apagando…`)
   clearInterval(healthTimer)
-  await shutdown()
+  stopLibrary()
+  await Promise.all([shutdown(), shutdownTasks()])
   closeAll()
   await Promise.all([app.close(), guestApp?.close()])
   closeDb()

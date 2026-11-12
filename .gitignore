@@ -12,6 +12,9 @@ trabajos/
 *.wav
 *.mp3
 
+# Herramientas descargadas por scripts/setup.sh (yt-dlp)
+tools/
+
 # Node
 node_modules/
 dist/
@@ -27,3 +30,4 @@ web/public/mock/*.json
 # Notas locales (no se versionan)
 CLAUDE.md
 docs/plan-original-fases.md
+docs/FEATURES.md
