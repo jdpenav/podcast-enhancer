@@ -64,8 +64,8 @@ export const CALIBRATION_SAMPLES = 5
 // yt-dlp: YTDLP=ruta, o tools/bin/yt-dlp (lo instala npm run setup), o el del PATH
 export const YTDLP_LOCAL = path.join(ROOT, 'tools/bin/yt-dlp')
 export const YTDLP_ENV = process.env.YTDLP ?? null
-// Canal de YouTube de la biblioteca: se configura en .env (ver .env.example). Sin canal, la biblioteca
-// funciona igual con los audios subidos; solo "Sincronizar con YouTube" pide configurarlo.
+// Solo para migrar instalaciones anteriores: si .env trae un canal, el primer espacio se crea con él.
+// Ahora los canales se conectan desde la app (Ajustes → Espacios).
 export const YT_CHANNEL_ID = process.env.YT_CHANNEL_ID?.trim() || null
 export const YT_STREAMS_URL =
   process.env.YT_STREAMS_URL?.trim() || (YT_CHANNEL_ID ? `https://www.youtube.com/channel/${YT_CHANNEL_ID}/streams` : null)
@@ -78,7 +78,7 @@ export const VOD_RETRY_MAX_HOURS = Number(process.env.VOD_RETRY_MAX_HOURS ?? 12)
 // ---------------------------------------------------------------------------
 // Editor y exportación (Feature 2)
 // ---------------------------------------------------------------------------
-export const PODCAST_NAME = process.env.PODCAST_NAME?.trim() || 'Podcast' // artista y álbum en las etiquetas ID3
+export const PODCAST_NAME_ENV = process.env.PODCAST_NAME?.trim() || null // semilla del primer espacio (ver arriba)
 export const PEAKS_PER_SEC = 20 // resolución de la onda del editor (1200 picos por minuto)
 export const CASTBOX_MAX_BYTES = 400 * 1024 * 1024
 export const MAX_ASSET_MB = 50

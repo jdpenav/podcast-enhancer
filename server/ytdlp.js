@@ -17,7 +17,7 @@ import { YTDLP_ENV, YTDLP_LOCAL } from './config.js'
 
 const run = promisify(execFile)
 
-/** Error de yt-dlp ya clasificado. kind: processing | upcoming | unavailable | network | blocked | missing | failed */
+/** Error de yt-dlp ya clasificado. kind: processing | upcoming | unavailable | notfound | invalid | network | blocked | missing | failed */
 export class YtError extends Error {
   constructor(kind, message, detail = '') {
     super(message)
@@ -132,6 +132,12 @@ export function classify(text) {
   }
   if (/confirm you.?re not a bot|HTTP Error 429|Too Many Requests/i.test(t)) {
     return new YtError('blocked', `YouTube está limitando las descargas desde esta conexión. Espera un rato o actualiza yt-dlp en Ajustes. Detalle: ${detail}`, detail)
+  }
+  if (/does not have a (streams|videos|live) tab/i.test(t)) {
+    return new YtError('notab', 'Ese canal no tiene esa pestaña.', detail)
+  }
+  if (/HTTP Error 404|This channel does not exist|does not exist|Incomplete YouTube ID|is not a valid URL/i.test(t)) {
+    return new YtError('notfound', 'No se encontró ese canal en YouTube. Revisa el enlace.', detail)
   }
   if (/Unable to download (webpage|API page)|getaddrinfo|Temporary failure in name resolution|Network is unreachable|timed out|Connection (refused|reset)|No route to host|URLError/i.test(t)) {
     return new YtError('network', 'No se pudo conectar con YouTube. Revisa tu conexión a internet.', detail)
@@ -264,4 +270,77 @@ export async function downloadAudio(id, outDir, { signal, onProgress } = {}) {
   const file = fs.readdirSync(outDir).find((f) => f.startsWith('source.') && !/\.(part|ytdl|temp)$/.test(f) && !f.includes('.part-'))
   if (!file) throw new YtError('failed', 'yt-dlp terminó pero no se encontró el audio descargado.')
   return path.join(outDir, file)
+}
+
+
+// ---------------------------------------------------------------------------
+// Canales (para crear espacios)
+// ---------------------------------------------------------------------------
+/**
+ * Normaliza lo que pega el usuario: @handle, UC…, URL del canal (cualquier pestaña) o de un video.
+ * Devuelve { kind: 'channel' | 'video', url } o null si no parece de YouTube.
+ */
+export function normalizeChannelInput(input) {
+  const t = String(input ?? '').trim()
+  if (!t) return null
+  if (/^@[\w.\-À-ÿ]{2,}$/.test(t)) return { kind: 'channel', url: `https://www.youtube.com/${t}` }
+  if (/^UC[\w-]{22}$/.test(t)) return { kind: 'channel', url: `https://www.youtube.com/channel/${t}` }
+  let u
+  try {
+    u = new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`)
+  } catch {
+    return null
+  }
+  const host = u.hostname.replace(/^(www\.|m\.)/, '')
+  if (host === 'youtu.be' && /^\/[\w-]{11}/.test(u.pathname)) return { kind: 'video', url: watchUrl(u.pathname.slice(1, 12)) }
+  if (host !== 'youtube.com') return null
+  const v = u.searchParams.get('v')
+  if (u.pathname === '/watch' && v) return { kind: 'video', url: watchUrl(v) }
+  const live = u.pathname.match(/^\/(?:live|shorts)\/([\w-]{11})/)
+  if (live) return { kind: 'video', url: watchUrl(live[1]) }
+  const ch = u.pathname.match(/^\/(@[^/]+|channel\/UC[\w-]{22}|c\/[^/]+|user\/[^/]+)/)
+  if (ch) return { kind: 'channel', url: `https://www.youtube.com/${decodeURIComponent(ch[1])}` }
+  return null
+}
+
+/**
+ * Datos del canal a partir de cualquier enlace: { id, title, handle, url, streamsUrl, avatarUrl }.
+ * streamsUrl es la pestaña de directos si existe; si el canal no transmite, la de videos.
+ */
+export async function resolveChannel(input, { signal } = {}) {
+  const n = normalizeChannelInput(input)
+  if (!n) throw new YtError('invalid', 'Pega el enlace del canal de YouTube (por ejemplo youtube.com/@tu-canal) o el de uno de sus videos.')
+  let base = n.url
+  if (n.kind === 'video') {
+    const { stdout } = await runYtdlp(['-J', '--no-playlist', '--no-warnings', n.url], { signal, collectStdout: true })
+    const info = JSON.parse(stdout)
+    if (!info.channel_id) throw new YtError('notfound', 'No se encontró el canal de ese video.')
+    base = `https://www.youtube.com/channel/${info.channel_id}`
+  }
+  let data = null
+  let tabUrl = null
+  for (const tab of ['streams', 'videos']) {
+    try {
+      tabUrl = `${base}/${tab}`
+      const { stdout } = await runYtdlp(['--flat-playlist', '-J', '--playlist-items', '1', '--no-warnings', tabUrl], { signal, collectStdout: true })
+      data = JSON.parse(stdout)
+      break
+    } catch (e) {
+      if (!(e instanceof YtError) || e.kind !== 'notab') throw e
+    }
+  }
+  if (!data) throw new YtError('notfound', 'Ese canal no tiene directos ni videos públicos.')
+  const id = data.channel_id ?? (String(data.id ?? '').startsWith('UC') ? data.id : null)
+  if (!id) throw new YtError('notfound', 'No se encontró ese canal en YouTube. Revisa el enlace.')
+  const handle = String(data.uploader_id ?? '').startsWith('@') ? data.uploader_id : null
+  const url = handle ? `https://www.youtube.com/${handle}` : `https://www.youtube.com/channel/${id}`
+  const avatar = (data.thumbnails ?? []).find((t) => t.id === 'avatar_uncropped')?.url ?? null
+  return {
+    id,
+    title: data.channel ?? data.uploader ?? String(data.title ?? '').replace(/ - (Live|Videos)$/, ''),
+    handle,
+    url,
+    streamsUrl: `${url}/${tabUrl.endsWith('/videos') ? 'videos' : 'streams'}`,
+    avatarUrl: avatar,
+  }
 }

@@ -27,6 +27,7 @@ Powered by the open-source [Resemble Enhance](https://github.com/resemble-ai/res
 - **Every audio in one place:** the live streams from your YouTube channel (synced with yt-dlp, no API key) and your uploads, each with its status and next step.
 - **One-click download** of a stream's audio track as is, with no conversion: the only lossy encoding is the final MP3.
 - **Streams that just ended:** YouTube can take hours to process a live recording before it can be downloaded. The app recognizes that state, waits, and downloads it on its own when it's ready.
+- **Workspaces:** one per channel or congregation, each with its own library, curtains and podcast name. Connect a channel by pasting any link to it; switch workspaces from the header.
 
 **Editor and export**
 
@@ -124,9 +125,7 @@ The **Biblioteca** (library) tab lists your channel's live streams next to the a
 
 ![The library](docs/images/library.png)
 
-**1. Connect your channel (once).** Copy `.env.example` to `.env` and set `YT_CHANNEL_ID` to your channel id (`UC…`; you'll find it at [youtube.com/account_advanced](https://www.youtube.com/account_advanced)). Restart the app and press **Sincronizar con YouTube**: it lists every past stream in a few seconds, without downloading anything.
-
-> Coming soon: connecting channels from the app itself, with one space per channel or congregation.
+**1. Connect your channel (once).** In **Biblioteca**, press **Conectar canal de YouTube** and paste a link to the channel (`youtube.com/@your-channel`) or to any of its videos. The app shows the channel's name and picture so you can confirm it's the right one. Then press **Sincronizar con YouTube**: it lists every past stream in a few seconds, without downloading anything. Channels that don't stream use their *Videos* tab.
 
 **2. Download → enhance.** **Descargar audio** saves the stream's audio track. **Mejorar audio** sends it to the GPU queue, like any upload. If the stream ended a moment ago, the episode shows *waiting for YouTube* with the time of the next automatic retry (every 30 min, for up to 12 h).
 
@@ -141,6 +140,17 @@ The **Biblioteca** (library) tab lists your channel's live streams next to the a
 **4. Publish.** Upload the MP3 to your podcast host. This step is manual.
 
 Everything (downloads, edits, exports) is stored under `data/` and survives restarts. Syncing again never duplicates episodes or touches the ones you already worked on.
+
+### Workspaces
+
+Producing podcasts for more than one channel, like several congregations of the same church? Create a **workspace** for each one. Every workspace has its own channel, library, curtains and podcast name (used in the MP3's tags); the GPU and its queue are shared.
+
+![Switching workspaces](docs/images/workspaces.png)
+
+- **Create one** from the header menu (*Nuevo espacio*) or in **Ajustes → Espacios**. A new workspace starts empty; *Sincronizar* brings only its own channel's streams.
+- **Switch** from the header menu. The choice is remembered per browser, so two people can work on different workspaces at the same time.
+- **Your data stays put:** after upgrading, everything you had becomes the first workspace (with the channel from `.env`, if you had set one). No files are moved.
+- When sharing your setup, guests can switch between workspaces; only you (on `localhost`) can create, edit or delete them.
 
 ## Share your local setup
 
@@ -211,9 +221,7 @@ Everything works out of the box. To change something, copy `.env.example` to `.e
 | `MAX_UPLOAD_MB` | `500` | Maximum upload size |
 | `DATA_DIR` | `./data` | Where uploads, results and the database are stored |
 | `HOST` | `localhost` | Network interface. Keep it local: anyone who can reach it can use your GPU |
-| `YT_CHANNEL_ID` | | Your YouTube channel id (`UC…`). Without it, the library only holds uploaded audio |
-| `YT_STREAMS_URL` | `/channel/<id>/streams` | The tab listed by *Sync with YouTube* |
-| `PODCAST_NAME` | `Podcast` | Artist and album in the exported MP3's ID3 tags |
+| `YT_CHANNEL_ID` / `YT_STREAMS_URL` / `PODCAST_NAME` | | Only to upgrade an older install: the first workspace is created with them. Channels are now connected from the app |
 | `RSS_SYNC_HOURS` | `3` | How often to check the RSS feed for new streams (it only lists them, never downloads). `0` turns it off |
 | `VOD_RETRY_MIN` / `VOD_RETRY_MAX_HOURS` | `30` / `12` | Retries for a stream that YouTube is still processing |
 | `YTDLP` / `YTDLP_EXTRA_ARGS` | | Another yt-dlp binary / extra arguments (e.g. `--cookies file.txt`) |

@@ -19,6 +19,7 @@ import {
 import {
   deleteEpisodeRow, episodesByStatus, getAsset, getEpisode, getJob, getSetting, insertEpisode,
   insertJob, jobsByEpisode, jobsWithoutEpisode, listEpisodes, setSetting, updateEpisodeRow, updateJob,
+  getWorkspace, listWorkspaces,
 } from './db.js'
 import {
   emitEpisode, epFiles, hasEnhanced, hasFinal, hasSource, mustGetEpisode, newEpisodeId,
@@ -32,7 +33,8 @@ import { jobHooks, kick, resume as resumeJob } from './queue.js'
 import { cancelTask, enqueueTask, hasTask } from './tasks.js'
 import { downloadAudio, videoInfo, YtError } from './ytdlp.js'
 import { ExportError, exportAudio, normalizePreset } from './exporter.js'
-import { channelConfigured, syncCatalog } from './catalog.js'
+import { syncCatalog } from './catalog.js'
+import { curtainDefaults, defaultWorkspace, setCurtainDefaults } from './workspaces.js'
 import { getWaveform } from './waveform.js'
 import { log } from './log.js'
 
@@ -55,9 +57,13 @@ export async function initLibrary() {
   await recoverEpisodes()
   // Reintentos del VOD: revisar cada minuto si a alguno le toca
   timers.push(setInterval(retryDueVods, 60_000))
-  // RSS periódico: solo DETECTA streams nuevos para la biblioteca; nunca descarga ni procesa solo
-  if (RSS_SYNC_HOURS > 0 && channelConfigured()) {
-    const rss = () => syncCatalog({ full: false }).catch((e) => log(`RSS: ${e.message}`))
+  // RSS periódico de cada espacio con canal: solo DETECTA streams nuevos; nunca descarga ni procesa solo
+  if (RSS_SYNC_HOURS > 0) {
+    const rss = async () => {
+      for (const ws of listWorkspaces().filter((w) => w.channelId)) {
+        await syncCatalog(ws, { full: false }).catch((e) => log(`RSS de "${ws.name}": ${e.message}`))
+      }
+    }
     setTimeout(rss, 5_000).unref()
     timers.push(setInterval(rss, RSS_SYNC_HOURS * 3600_000))
   }
@@ -121,6 +127,7 @@ export async function createUploadEpisode(job, { episodeId = newEpisodeId(), qui
   const now = nowIso()
   const ep = {
     id: episodeId,
+    workspaceId: job.workspaceId ?? defaultWorkspace()?.id ?? null,
     source: 'upload',
     youtubeId: null,
     owner: job.owner ?? 'local',
@@ -182,6 +189,7 @@ export async function createJobFromEpisode(ep, { mode, quality }, viewer) {
       activeSec: 0,
       owner: viewer?.owner ?? 'local',
       episodeId: ep.id,
+      workspaceId: ep.workspaceId,
     })
     log(`+ ${job.id} desde episodio ${ep.id} (${mode}${job.quality ? '/' + job.quality : ''})`)
     broadcast('job', jobToApi(job), job.owner)
@@ -447,21 +455,6 @@ export async function episodePeaks(ep) {
   return getWaveform(f.enhancedMp3, f.peaks, duration, { pointsPerSec: PEAKS_PER_SEC })
 }
 
-export function getDefaults() {
-  const d = getSetting('curtainDefaults', {})
-  // Si una cortina predeterminada se borró, no devolverla
-  return {
-    introId: d.introId && getAsset(d.introId) ? d.introId : null,
-    outroId: d.outroId && getAsset(d.outroId) ? d.outroId : null,
-  }
-}
-
-export function setDefaults({ introId, outroId }) {
-  for (const id of [introId, outroId]) if (id && !getAsset(id)) throw new HttpError(400, 'INVALID_REQUEST', 'La cortina elegida no existe.')
-  setSetting('curtainDefaults', { introId: introId ?? null, outroId: outroId ?? null })
-  return getDefaults()
-}
-
 const MAX_CUTS = 500
 
 /** Valida y guarda el estado del editor. También recuerda las cortinas como predeterminadas. */
@@ -481,9 +474,14 @@ export function saveEdit(ep, body) {
   })
   const introId = body?.introId ?? null
   const outroId = body?.outroId ?? null
-  for (const id of [introId, outroId]) if (id && !getAsset(id)) throw new HttpError(400, 'INVALID_REQUEST', 'La cortina elegida no existe.')
+  for (const id of [introId, outroId]) {
+    const a = id ? getAsset(id) : null
+    if (id && (!a || a.workspaceId !== ep.workspaceId)) throw new HttpError(400, 'INVALID_REQUEST', 'La cortina elegida no existe en este espacio.')
+  }
   const editState = { cuts, introId, outroId, preset: normalizePreset(body?.preset), savedAt: nowIso() }
-  setSetting('curtainDefaults', { introId, outroId })
+  // Las cortinas elegidas quedan como predeterminadas del espacio
+  const ws = getWorkspace(ep.workspaceId)
+  if (ws) setCurtainDefaults(ws, { introId, outroId })
   const status = ['enhancing', 'downloading'].includes(ep.status) ? ep.status : 'editing'
   return setEpisode(ep.id, { editState, status, error: ep.status === 'error' ? null : ep.error })
 }
@@ -501,10 +499,16 @@ export function requestExport(ep) {
   return updated
 }
 
-function resolveCurtain(id, which) {
+/** Artista/álbum de las etiquetas ID3: el nombre de podcast del espacio (o su nombre). */
+function podcastNameFor(ep) {
+  const ws = getWorkspace(ep.workspaceId) ?? defaultWorkspace()
+  return ws?.podcastName || ws?.name || 'Podcast'
+}
+
+function resolveCurtain(id, which, workspaceId) {
   if (!id) return null
   const a = getAsset(id)
-  if (!a || !fs.existsSync(assetPath(a))) throw new ExportError('ASSET_MISSING', `La cortina de ${which} ya no existe. Elige otra en el editor.`)
+  if (!a || a.workspaceId !== workspaceId || !fs.existsSync(assetPath(a))) throw new ExportError('ASSET_MISSING', `La cortina de ${which} ya no existe. Elige otra en el editor.`)
   return { id: a.id, name: a.name, durationSec: a.durationSec, path: assetPath(a) }
 }
 
@@ -519,10 +523,10 @@ async function runExport(id, { signal }) {
       enhancedPath: f.enhancedWav,
       outPath: f.final,
       cuts: st.cuts ?? [],
-      intro: resolveCurtain(st.introId, 'entrada'),
-      outro: resolveCurtain(st.outroId, 'salida'),
+      intro: resolveCurtain(st.introId, 'entrada', ep.workspaceId),
+      outro: resolveCurtain(st.outroId, 'salida', ep.workspaceId),
       preset: st.preset,
-      meta: { title: ep.title, date: ep.publishedAt },
+      meta: { title: ep.title, date: ep.publishedAt, podcastName: podcastNameFor(ep) },
       signal,
       onProgress: (percent, stage) => {
         const now = Date.now()
@@ -543,4 +547,4 @@ async function runExport(id, { signal }) {
   }
 }
 
-export { listEpisodes, mustGetEpisode, hasFinal }
+export { listEpisodes, mustGetEpisode, hasFinal, curtainDefaults }

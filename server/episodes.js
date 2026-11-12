@@ -84,6 +84,7 @@ export function episodeToApi(ep) {
   const job = ep.jobId ? getJob(ep.jobId) : null
   return {
     id: ep.id,
+    workspaceId: ep.workspaceId ?? null,
     source: ep.source,
     youtubeVideoId: ep.youtubeId ?? null,
     youtubeUrl: ep.youtubeId ? `https://www.youtube.com/watch?v=${ep.youtubeId}` : null,

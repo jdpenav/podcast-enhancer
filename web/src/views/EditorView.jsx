@@ -169,9 +169,12 @@ export default function EditorView({ api, config, id, library, jobs, now, mock, 
     }
   }, [api, id, ready, ep?.enhance?.mode, ep?.enhance?.quality]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cortinas del espacio del episodio (cada espacio tiene las suyas)
+  const wsId = ep?.workspaceId
   const loadAssets = useCallback(() => {
-    api?.listAssets().then(setAssets).catch(() => setAssets({ items: [], defaults: {} }))
-  }, [api])
+    if (!api || !wsId) return
+    api.listAssets(wsId).then(setAssets).catch(() => setAssets({ items: [], defaults: {} }))
+  }, [api, wsId])
   useEffect(loadAssets, [loadAssets])
 
   useEffect(() => {

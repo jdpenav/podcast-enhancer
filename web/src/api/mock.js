@@ -74,6 +74,7 @@ function makeJob({ filename, sizeBytes, durationSec, mode, quality, ...rest }) {
     outputs: null,
     guest: null,
     episodeId: null,
+    workspaceId: 'w_demo1',
     ...rest,
   }
 }
@@ -264,7 +265,7 @@ export async function getJob(id) {
   return clone(mustGet(id))
 }
 
-export async function createJob(file, { mode, quality }, { onProgress, signal } = {}) {
+export async function createJob(file, { mode, quality }, { onProgress, signal, workspace = 'w_demo1' } = {}) {
   if (!CONFIG.acceptedTypes.includes(extOf(file.name))) {
     throw new ApiError('Formato no soportado. Usa MP3, WAV, M4A, AAC, OGG, FLAC o MP4.', { code: 'INVALID_FILE', status: 400 })
   }
@@ -294,7 +295,7 @@ export async function createJob(file, { mode, quality }, { onProgress, signal } 
     }, 80)
   })
 
-  const job = makeJob({ filename: file.name, sizeBytes: file.size, durationSec, mode, quality })
+  const job = makeJob({ filename: file.name, sizeBytes: file.size, durationSec, mode, quality, workspaceId: workspace })
   jobs.set(job.id, job)
   emit('onJob', job)
   return clone(job)
@@ -365,7 +366,6 @@ export function subscribeEvents(handlers) {
 // Biblioteca (episodios), cortinas y sistema — misma interfaz que client.js
 // ===========================================================================
 const CONFIG_EXPORT = {
-  podcastName: 'Mi podcast',
   exportPreset: { name: 'castbox', bitrateKbps: 128, channels: 1, sampleRate: 44100, lufs: -16, truePeak: -1, cutCrossfadeMs: 20, curtainFadeSec: 0 },
   presetLimits: { bitrateKbps: [64, 96, 128, 160, 192, 256, 320], channels: [1, 2], lufs: [-24, -12], cutCrossfadeMs: [0, 200], curtainFadeSec: [0, 5] },
 }
@@ -373,13 +373,25 @@ Object.assign(CONFIG, CONFIG_EXPORT)
 
 const episodes = new Map()
 const assets = new Map()
-let assetDefaults = { introId: 'a_intro', outroId: 'a_outro' }
+const assetDefaults = { w_demo1: { introId: 'a_intro', outroId: 'a_outro' }, w_demo2: { introId: null, outroId: null } }
+const workspaces = new Map([
+  ['w_demo1', {
+    id: 'w_demo1', name: 'Sede central', podcastName: 'Mi podcast',
+    channel: { id: 'UCdemo0000000000000000001', title: 'Mi canal', handle: '@mi-canal', url: 'https://www.youtube.com/@mi-canal', streamsUrl: 'https://www.youtube.com/@mi-canal/streams', avatarUrl: null },
+    counts: { episodes: 8, youtube: 7, withAudio: 4, ready: 1 }, isDefault: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  }],
+  ['w_demo2', {
+    id: 'w_demo2', name: 'Sede sur', podcastName: 'Sede sur', channel: null,
+    counts: { episodes: 0, youtube: 0, withAudio: 0, ready: 0 }, isDefault: false, createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z',
+  }],
+])
 const MOCK_PEAKS_SEC = 60 // los audios de prueba (public/mock) duran ~60 s
 
 function makeEpisode(o) {
   const t = nowIso()
   return {
     id: o.id,
+    workspaceId: o.workspaceId ?? 'w_demo1',
     source: o.source ?? 'youtube',
     youtubeVideoId: o.youtubeVideoId ?? null,
     youtubeUrl: o.youtubeVideoId ? `https://www.youtube.com/watch?v=${o.youtubeVideoId}` : null,
@@ -428,8 +440,8 @@ const daysAgo = (d) => new Date(Date.now() - d * 86400e3).toISOString()
   for (const e of list) episodes.set(e.id, e)
   const demoJob = jobs.get('j_demo01')
   if (demoJob) demoJob.episodeId = 'e_demo01'
-  assets.set('a_intro', { id: 'a_intro', name: 'Intro del podcast', filename: 'intro.mp3', durationSec: 12.4, sizeBytes: 198_000, createdAt: daysAgo(40), url: '/mock/original.mp3' })
-  assets.set('a_outro', { id: 'a_outro', name: 'Outro con despedida', filename: 'outro.wav', durationSec: 18.1, sizeBytes: 3_190_000, createdAt: daysAgo(40), url: '/mock/result.mp3' })
+  assets.set('a_intro', { workspaceId: 'w_demo1', id: 'a_intro', name: 'Intro del podcast', filename: 'intro.mp3', durationSec: 12.4, sizeBytes: 198_000, createdAt: daysAgo(40), url: '/mock/original.mp3' })
+  assets.set('a_outro', { workspaceId: 'w_demo1', id: 'a_outro', name: 'Outro con despedida', filename: 'outro.wav', durationSec: 18.1, sizeBytes: 3_190_000, createdAt: daysAgo(40), url: '/mock/result.mp3' })
 })()
 
 function fakeExport(durationSec, preset, exportedAt = nowIso()) {
@@ -507,9 +519,9 @@ function libraryJobDone(job) {
   saveEp(ep, { status: ep.editState ? 'editing' : 'enhanced', enhance: { mode: job.mode, quality: job.quality }, files: { ...ep.files, ...files(ep.id, 'enhanced') } })
 }
 
-export async function listEpisodes() {
+export async function listEpisodes({ workspace = 'w_demo1' } = {}) {
   await delay(150)
-  return [...episodes.values()].map((e) => clone(withJob(e))).sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''))
+  return [...episodes.values()].filter((e) => e.workspaceId === workspace).map((e) => clone(withJob(e))).sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''))
 }
 export async function getEpisode(id) {
   await delay(80)
@@ -519,12 +531,27 @@ export async function renameEpisode(id, title) {
   await delay(120)
   return saveEp(mustEp(id), { title })
 }
-export async function syncEpisodes() {
+export async function syncEpisodes({ workspace = 'w_demo1' } = {}) {
+  const ws = workspaces.get(workspace)
+  if (!ws?.channel) throw new ApiError(`El espacio "${ws?.name}" todavía no tiene un canal de YouTube. Conéctalo en Ajustes → Espacios.`, { code: 'CHANNEL_NOT_CONFIGURED', status: 409 })
   await delay(1800)
+  if (workspace !== 'w_demo1') {
+    // Un canal recién conectado: trae tres directos de ejemplo
+    let added = 0
+    for (let i = 1; i <= 3; i++) {
+      const id = `yt_${workspace}_${i}`
+      if (episodes.has(id)) continue
+      episodes.set(id, makeEpisode({ id, workspaceId: workspace, youtubeVideoId: id, title: `${ws.name} · Directo ${4 - i}`, publishedAt: daysAgo(i * 7) }))
+      added++
+    }
+    ws.counts = { ...ws.counts, episodes: ws.counts.episodes + added, youtube: ws.counts.youtube + added }
+    emit('onLibrary', { reason: 'sync', workspaceId: workspace, added, updated: 0 })
+    return { added, updated: 0, total: 3, full: true, warnings: [] }
+  }
   const id = 'yt_demo_new'
   if (!episodes.has(id)) {
     episodes.set(id, makeEpisode({ id, youtubeVideoId: 'demonew', title: 'Episodio 49 · Recién terminado', publishedAt: new Date(Date.now() - 600e3).toISOString() }))
-    emit('onLibrary', { reason: 'sync', added: 1, updated: 0 })
+    emit('onLibrary', { reason: 'sync', workspaceId: 'w_demo1', added: 1, updated: 0 })
     return { added: 1, updated: 0, total: episodes.size, full: true, warnings: [] }
   }
   return { added: 0, updated: 0, total: episodes.size, full: true, warnings: [] }
@@ -570,7 +597,7 @@ export async function getEpisodePeaks() {
 export async function saveEpisodeEdit(id, state) {
   await delay(200)
   const ep = mustEp(id)
-  if (state.introId || state.outroId) assetDefaults = { introId: state.introId ?? null, outroId: state.outroId ?? null }
+  assetDefaults[ep.workspaceId] = { introId: state.introId ?? null, outroId: state.outroId ?? null }
   return saveEp(ep, { editState: { ...state, savedAt: nowIso() }, status: 'editing' })
 }
 export async function exportEpisode(id) {
@@ -582,7 +609,7 @@ export async function exportEpisode(id) {
 export async function createJobFromEpisode(episodeId, { mode, quality }) {
   await delay(250)
   const ep = mustEp(episodeId)
-  const job = makeJob({ filename: `${ep.title}.m4a`, sizeBytes: 52_000_000, durationSec: ep.durationSec, mode, quality, episodeId })
+  const job = makeJob({ filename: `${ep.title}.m4a`, sizeBytes: 52_000_000, durationSec: ep.durationSec, mode, quality, episodeId, workspaceId: ep.workspaceId })
   jobs.set(job.id, job)
   emit('onJob', job)
   saveEp(ep, { status: 'enhancing', jobId: job.id })
@@ -591,14 +618,14 @@ export async function createJobFromEpisode(episodeId, { mode, quality }) {
 export const episodeAudioUrl = (_ep, which) => (which === 'source' ? '/mock/original.mp3' : '/mock/result.mp3')
 export const episodeDownloadUrl = (_ep, which) => (which === 'source' ? '/mock/original.mp3' : '/mock/result.mp3')
 
-export async function listAssets() {
+export async function listAssets(workspace = 'w_demo1') {
   await delay(120)
-  return { items: clone([...assets.values()]), defaults: { ...assetDefaults } }
+  return { items: clone([...assets.values()].filter((a) => a.workspaceId === workspace)), defaults: { ...(assetDefaults[workspace] ?? { introId: null, outroId: null }) } }
 }
-export async function uploadAsset(file, name) {
+export async function uploadAsset(file, name, workspace = 'w_demo1') {
   await delay(600)
   const id = randomId().replace('j_', 'a_')
-  const a = { id, name: name || file.name.replace(/\.[^.]+$/, ''), filename: file.name, durationSec: 15, sizeBytes: file.size, createdAt: nowIso(), url: URL.createObjectURL(file) }
+  const a = { id, workspaceId: workspace, name: name || file.name.replace(/\.[^.]+$/, ''), filename: file.name, durationSec: 15, sizeBytes: file.size, createdAt: nowIso(), url: URL.createObjectURL(file) }
   assets.set(id, a)
   return clone(a)
 }
@@ -613,10 +640,58 @@ export async function deleteAsset(id) {
   assets.delete(id)
   return null
 }
-export async function setAssetDefaults(d) {
+export async function setAssetDefaults({ workspace = 'w_demo1', introId = null, outroId = null }) {
   await delay(100)
-  assetDefaults = { introId: d.introId ?? null, outroId: d.outroId ?? null }
-  return { ...assetDefaults }
+  assetDefaults[workspace] = { introId, outroId }
+  return { ...assetDefaults[workspace] }
+}
+
+// --- Espacios ---
+export async function listWorkspaces() {
+  await delay(100)
+  return clone([...workspaces.values()])
+}
+export async function resolveChannel(url) {
+  await delay(1500)
+  const handle = String(url).match(/@([\w.-]+)/)?.[1]
+  if (!handle) throw new ApiError('Pega el enlace del canal de YouTube (por ejemplo youtube.com/@tu-canal) o el de uno de sus videos.', { code: 'INVALID_REQUEST', status: 400 })
+  const used = [...workspaces.values()].find((w) => w.channel?.handle === `@${handle}`)
+  const title = handle.replace(/[-_.]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return {
+    channel: { id: `UC${handle.padEnd(22, '0').slice(0, 22)}`, title, handle: `@${handle}`, url: `https://www.youtube.com/@${handle}`, streamsUrl: `https://www.youtube.com/@${handle}/streams`, avatarUrl: null },
+    workspaceId: used?.id ?? null,
+  }
+}
+export async function createWorkspace({ name, podcastName, channelUrl }) {
+  const channel = channelUrl ? (await resolveChannel(channelUrl)).channel : null
+  const id = randomId().replace('j_', 'w_')
+  const t = nowIso()
+  const w = { id, name, podcastName: podcastName || name, channel, counts: { episodes: 0, youtube: 0, withAudio: 0, ready: 0 }, isDefault: false, createdAt: t, updatedAt: t }
+  workspaces.set(id, w)
+  assetDefaults[id] = { introId: null, outroId: null }
+  emit('onWorkspace', w)
+  return clone(w)
+}
+export async function updateWorkspace(id, { name, podcastName, channelUrl }) {
+  const w = workspaces.get(id)
+  if (!w) throw new ApiError('El espacio no existe.', { code: 'NOT_FOUND', status: 404 })
+  if (name !== undefined) w.name = name
+  if (podcastName !== undefined) w.podcastName = podcastName || w.name
+  if (channelUrl !== undefined) w.channel = channelUrl ? (await resolveChannel(channelUrl)).channel : null
+  w.updatedAt = nowIso()
+  emit('onWorkspace', w)
+  return clone(w)
+}
+export async function deleteWorkspace(id) {
+  await delay(200)
+  if (workspaces.size <= 1) throw new ApiError('Es el único espacio: crea otro antes de eliminar este.', { code: 'CONFLICT', status: 409 })
+  if ([...episodes.values()].some((e) => e.workspaceId === id && e.files.source)) {
+    throw new ApiError('Este espacio tiene episodios con audio. Bórralos primero desde la Biblioteca.', { code: 'CONFLICT', status: 409 })
+  }
+  for (const e of [...episodes.values()]) if (e.workspaceId === id) episodes.delete(e.id)
+  workspaces.delete(id)
+  emit('onWorkspaceDeleted', { id })
+  return null
 }
 export const assetAudioUrl = (a) => a.url
 
@@ -627,7 +702,7 @@ export async function getSystem() {
     ffmpeg: { installed: true, version: '4.4.2' },
     model: { present: true },
     disk: { freeBytes: 182e9, totalBytes: 251e9 },
-    library: { channelUrl: 'https://www.youtube.com/@mi-canal/streams', vodRetryMin: 30, vodRetryMaxHours: 12, rssSyncHours: 3 },
+    library: { vodRetryMin: 30, vodRetryMaxHours: 12, rssSyncHours: 3 },
   }
 }
 export async function updateYtdlp() {

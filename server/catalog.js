@@ -1,9 +1,9 @@
-// Sincronización del catálogo del canal con la biblioteca.
+// Sincronización del catálogo del canal de un espacio con su biblioteca.
 //  - RSS (feeds/videos.xml): rápido, sin API key, fechas exactas, pero solo los 15 más recientes.
-//  - yt-dlp sobre /streams: el histórico completo, sin descargar media.
+//  - yt-dlp sobre /streams (o /videos): el histórico completo, sin descargar media.
 // Upsert por youtubeVideoId: nunca duplica y nunca toca el estado ni los archivos de un episodio.
-import { YT_CHANNEL_ID, YT_STREAMS_URL } from './config.js'
 import { HttpError } from './errors.js'
+import { emitWorkspace } from './workspaces.js'
 import { episodeByYoutubeId, insertEpisode, transaction, updateEpisodeRow } from './db.js'
 import { youtubeEpisodeId } from './episodes.js'
 import { broadcast } from './events.js'
@@ -21,9 +21,9 @@ const decodeXml = (s) =>
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/&amp;/g, '&')
 
-/** Videos del RSS: [{ youtubeId, title, publishedAt }] (más reciente primero). */
-export async function fetchRss() {
-  const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${YT_CHANNEL_ID}`
+/** Videos del RSS de un canal: [{ youtubeId, title, publishedAt }] (más reciente primero). */
+export async function fetchRss(channelId) {
+  const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`
   let res
   try {
     res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
@@ -43,12 +43,15 @@ export async function fetchRss() {
  * Inserta o actualiza un video. `exactDate`: la fecha viene de una fuente exacta (RSS / metadatos)
  * y puede reemplazar una aproximada. Devuelve 'added' | 'updated' | null (sin cambios).
  */
-function upsert(v, { exactDate }) {
+function upsert(v, { exactDate, workspaceId }) {
   const now = new Date().toISOString()
   const ep = episodeByYoutubeId(v.youtubeId)
+  // Un video pertenece a un solo canal (y un canal a un solo espacio): nunca se mueve de espacio
+  if (ep && ep.workspaceId !== workspaceId) return 'skipped'
   if (!ep) {
     insertEpisode({
       id: youtubeEpisodeId(v.youtubeId),
+      workspaceId,
       source: 'youtube',
       youtubeId: v.youtubeId,
       owner: null,
@@ -77,7 +80,7 @@ function upsert(v, { exactDate }) {
 }
 
 function upsertMany(videos, opts) {
-  const r = { added: 0, updated: 0 }
+  const r = { added: 0, updated: 0, skipped: 0 }
   transaction(() => {
     for (const v of videos) {
       const res = upsert(v, opts)
@@ -87,39 +90,41 @@ function upsertMany(videos, opts) {
   return r
 }
 
-let inflight = null
+const inflight = new Map() // espacio → Promise
 
 /**
- * Sincroniza. Con full=false solo el RSS (segundos); con full=true también el listado completo
- * (puede tardar ~30 s). Las llamadas simultáneas comparten la misma ejecución.
- * Al terminar emite un único evento `library` para que la UI recargue la lista.
+ * Sincroniza el canal de un espacio. Con full=false solo el RSS (segundos); con full=true también el
+ * listado completo (puede tardar ~30 s). Las llamadas simultáneas del mismo espacio comparten la
+ * ejecución. Al terminar emite un único evento `library` para que la UI recargue la lista.
  */
-export const channelConfigured = () => !!YT_CHANNEL_ID
-
-export function syncCatalog({ full = true } = {}) {
-  if (!YT_CHANNEL_ID) {
+export function syncCatalog(ws, { full = true } = {}) {
+  if (!ws?.channelId) {
     return Promise.reject(
-      new HttpError(409, 'CHANNEL_NOT_CONFIGURED', 'Todavía no hay un canal de YouTube configurado. Agrega YT_CHANNEL_ID en el archivo .env (mira .env.example) y reinicia la app.'),
+      new HttpError(409, 'CHANNEL_NOT_CONFIGURED', `El espacio "${ws?.name ?? ''}" todavía no tiene un canal de YouTube. Conéctalo en Ajustes → Espacios.`),
     )
   }
-  inflight ??= (async () => {
+  if (inflight.has(ws.id)) return inflight.get(ws.id)
+  const opts = { workspaceId: ws.id }
+  const p = (async () => {
     const result = { added: 0, updated: 0, total: 0, full, warnings: [] }
     // 1) Histórico completo (si se pide): primero, para que el RSS luego afine las fechas recientes
     if (full) {
+      const tab = ws.streamsUrl ?? `https://www.youtube.com/channel/${ws.channelId}/streams`
       // Los directos programados (aún no empiezan) no se pueden descargar: no se listan
-      const videos = (await listChannel(YT_STREAMS_URL)).filter((v) => v.liveStatus !== 'is_upcoming')
-      const r = upsertMany(videos, { exactDate: false })
+      const videos = (await listChannel(tab)).filter((v) => v.liveStatus !== 'is_upcoming')
+      const r = upsertMany(videos, { ...opts, exactDate: false })
       result.added += r.added
       result.updated += r.updated
       result.total = videos.length
+      if (r.skipped) result.warnings.push(`${r.skipped} videos ya estaban en otro espacio y no se movieron.`)
     }
     // 2) RSS: fechas exactas de lo más reciente. Si falla tras un listado completo, no es grave.
     try {
-      const rss = await fetchRss()
+      const rss = await fetchRss(ws.channelId)
       // El RSS incluye videos normales además de directos: solo se actualizan los que ya existen,
       // salvo que no se haya hecho listado completo (entonces el RSS es la única fuente).
       const videos = full ? rss.filter((v) => episodeByYoutubeId(v.youtubeId)) : rss
-      const r = upsertMany(videos, { exactDate: true })
+      const r = upsertMany(videos, { ...opts, exactDate: true })
       result.added += r.added
       result.updated += r.updated
       if (!full) result.total = rss.length
@@ -127,11 +132,13 @@ export function syncCatalog({ full = true } = {}) {
       if (!full) throw e
       result.warnings.push(e.message)
     }
-    log(`⟳ catálogo${full ? ' completo' : ' (RSS)'}: ${result.added} nuevos, ${result.updated} actualizados`)
-    broadcast('library', { reason: 'sync', added: result.added, updated: result.updated })
+    log(`⟳ catálogo de "${ws.name}"${full ? ' completo' : ' (RSS)'}: ${result.added} nuevos, ${result.updated} actualizados`)
+    broadcast('library', { reason: 'sync', workspaceId: ws.id, added: result.added, updated: result.updated })
+    emitWorkspace(ws.id) // conteos
     return result
-  })().finally(() => (inflight = null))
-  return inflight
+  })().finally(() => inflight.delete(ws.id))
+  inflight.set(ws.id, p)
+  return p
 }
 
-export const syncInProgress = () => !!inflight
+export const syncInProgress = (wsId) => inflight.has(wsId)

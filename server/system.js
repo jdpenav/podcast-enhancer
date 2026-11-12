@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { ROOT, RSS_SYNC_HOURS, VOD_RETRY_MAX_HOURS, VOD_RETRY_MIN, YT_STREAMS_URL } from './config.js'
+import { ROOT, RSS_SYNC_HOURS, VOD_RETRY_MAX_HOURS, VOD_RETRY_MIN } from './config.js'
 import { diskInfo } from './media.js'
 import { ytdlpVersion } from './ytdlp.js'
 
@@ -26,6 +26,6 @@ export async function systemStatus() {
     ffmpeg,
     model: { present: fs.existsSync(MODEL_FILE) },
     disk,
-    library: { channelUrl: YT_STREAMS_URL, vodRetryMin: VOD_RETRY_MIN, vodRetryMaxHours: VOD_RETRY_MAX_HOURS, rssSyncHours: RSS_SYNC_HOURS },
+    library: { vodRetryMin: VOD_RETRY_MIN, vodRetryMaxHours: VOD_RETRY_MAX_HOURS, rssSyncHours: RSS_SYNC_HOURS },
   }
 }

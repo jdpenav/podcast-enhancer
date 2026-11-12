@@ -16,7 +16,7 @@ const PAGE = 30
  * Biblioteca: todos los audios (streams del canal y subidas) en un solo lugar,
  * con su estado y la acción siguiente (descargar → mejorar → editar → exportar).
  */
-export default function LibraryView({ api, library, jobs, now, onEnhance, onEdit }) {
+export default function LibraryView({ api, library, jobs, now, workspace, canManage, onConnectChannel, onEnhance, onEdit }) {
   const toast = useToast()
   const { episodes, loaded, actions } = library
   const [filter, setFilter] = useState('all')
@@ -37,6 +37,7 @@ export default function LibraryView({ api, library, jobs, now, onEnhance, onEdit
     return bySource.filter(f.test).filter((e) => !q || normalizeText(e.title).includes(q))
   }, [bySource, filter, query])
   const hasYoutube = episodes.some((e) => e.source === 'youtube')
+  const channel = workspace?.channel ?? null
 
   const sync = async () => {
     setSyncing(true)
@@ -87,12 +88,27 @@ export default function LibraryView({ api, library, jobs, now, onEnhance, onEdit
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Biblioteca</h1>
           <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            Los directos de tu canal y los audios subidos, en un solo lugar.
+            {channel ? (
+              <>
+                Los directos de <span className="font-medium text-neutral-700 dark:text-neutral-300">{channel.title ?? channel.handle}</span> y los audios
+                subidos{workspace?.name ? ` a «${workspace.name}»` : ''}.
+              </>
+            ) : (
+              <>Los audios de «{workspace?.name}». Conecta su canal de YouTube para traer sus directos.</>
+            )}
           </p>
         </div>
-        <Button icon={RefreshCw} onClick={sync} loading={syncing} className={cn(syncing && '[&_svg]:animate-spin')}>
-          {syncing ? 'Sincronizando…' : 'Sincronizar con YouTube'}
-        </Button>
+        {channel ? (
+          <Button icon={RefreshCw} onClick={sync} loading={syncing} className={cn(syncing && '[&_svg]:animate-spin')}>
+            {syncing ? 'Sincronizando…' : 'Sincronizar con YouTube'}
+          </Button>
+        ) : (
+          canManage && (
+            <Button icon={Youtube} onClick={onConnectChannel}>
+              Conectar canal de YouTube
+            </Button>
+          )
+        )}
       </div>
 
       {/* Búsqueda y filtros */}
@@ -174,6 +190,28 @@ export default function LibraryView({ api, library, jobs, now, onEnhance, onEdit
             <JobSkeleton />
             <JobSkeleton />
           </>
+        ) : !channel && (episodes.length === 0 || source === 'youtube') ? (
+          <div className="card flex flex-col items-center gap-4 px-6 py-12 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-100 dark:bg-neutral-800">
+              <Youtube size={24} aria-hidden />
+            </span>
+            <div className="max-w-sm">
+              <p className="font-semibold tracking-tight">Conecta el canal de «{workspace?.name}»</p>
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                Pega el enlace del canal de YouTube y la Biblioteca traerá sus directos. Nada se descarga hasta que tú lo pidas.
+              </p>
+            </div>
+            {canManage ? (
+              <Button variant="primary" icon={Youtube} onClick={onConnectChannel}>
+                Conectar canal
+              </Button>
+            ) : (
+              <p className="text-[13px] text-neutral-500 dark:text-neutral-400">Pídele a quien administra la app que conecte el canal.</p>
+            )}
+            <p className="text-[13px] text-neutral-500 dark:text-neutral-400">
+              ¿Tienes el audio en tu computadora? <a href={routeHref.enhance} className="font-medium text-neutral-800 underline-offset-2 hover:underline dark:text-neutral-200">Súbelo desde Mejorar</a>.
+            </p>
+          </div>
         ) : episodes.length === 0 || (!hasYoutube && source === 'youtube') ? (
           <div className="card flex flex-col items-center gap-4 px-6 py-12 text-center">
             <span className="grid h-14 w-14 place-items-center rounded-2xl bg-neutral-100 dark:bg-neutral-800">

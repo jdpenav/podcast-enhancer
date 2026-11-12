@@ -82,7 +82,6 @@ Modes and time factors, so the UI can estimate processing time before uploading:
   "maxUploadMB": 500,
   "acceptedTypes": [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp4"],
   "role": "owner",
-  "podcastName": "Mi podcast",
   "exportPreset": { "name": "castbox", "bitrateKbps": 128, "channels": 1, "sampleRate": 44100, "lufs": -16, "truePeak": -1, "cutCrossfadeMs": 20, "curtainFadeSec": 0 },
   "presetLimits": { "bitrateKbps": [64, 96, 128, 160, 192, 256, 320], "channels": [1, 2], "lufs": [-24, -12], "cutCrossfadeMs": [0, 200], "curtainFadeSec": [0, 5] }
 }
@@ -152,7 +151,9 @@ One stream for the whole dashboard. Each message has an `event:` and a JSON `dat
 | `episode` | The full `Episode`, when it's created or changes (status, files, edit state, export) |
 | `episodeProgress` | `{ "id": "yt_…", "progress": { ... } }` during downloads and exports (~1–2 per second at most) |
 | `episodeDeleted` | `{ "id": "e_…" }` when an uploaded episode is deleted |
-| `library` | `{ "reason": "sync", "added": 3, "updated": 1 }` after a catalog sync: reload `GET /api/episodes` |
+| `library` | `{ "reason": "sync", "workspaceId": "w_…", "added": 3, "updated": 1 }` after a catalog sync: reload `GET /api/episodes` for that workspace |
+| `workspace` | The full `Workspace`, when it's created or changes (name, channel, counts after a sync) |
+| `workspaceDeleted` | `{ "id": "w_…" }` |
 
 A `: ping` comment is sent every 15 s to keep proxies from closing the connection. Clients should reconnect automatically (`EventSource` does).
 
@@ -160,7 +161,7 @@ A `: ping` comment is sent every 15 s to keep proxies from closing the connectio
 
 ## Library
 
-The library centralizes **every** audio: the streams from your YouTube channel (`YT_CHANNEL_ID` in `.env`) and manual uploads. From there an episode is enhanced (a normal `Job`), edited (cuts + intro/outro) and exported as the final MP3 for Castbox. Uploading to Castbox stays manual.
+The library centralizes **every** audio of a [workspace](#workspaces): the streams from its YouTube channel and manual uploads. From there an episode is enhanced (a normal `Job`), edited (cuts + intro/outro) and exported as the final MP3 for Castbox. Uploading to Castbox stays manual.
 
 ### `Episode`
 
@@ -241,9 +242,9 @@ YouTube episodes are shared: every visitor (owner and guests) sees them. Uploade
 
 ### `POST /api/episodes/sync`
 
-Body (optional): `{ "full": true }`. Syncs the catalog: with `full` (default) it lists the whole `/streams` tab with yt-dlp (may take ~30 s), then refines recent dates with the RSS feed; with `full: false`, RSS only (the 15 most recent). Upsert by video id: it never duplicates and never touches the status or files of an existing episode. Scheduled lives that haven't started are skipped.
+Body: `{ "workspace": "w_…", "full": true }` (both optional). Syncs the catalog: with `full` (default) it lists the whole `/streams` tab with yt-dlp (may take ~30 s), then refines recent dates with the RSS feed; with `full: false`, RSS only (the 15 most recent). Upsert by video id: it never duplicates and never touches the status or files of an existing episode. Scheduled lives that haven't started are skipped.
 
-→ `200` with `{ "added": 3, "updated": 1, "total": 214, "full": true, "warnings": [] }`. `409 CHANNEL_NOT_CONFIGURED` if no channel is configured. Simultaneous calls share the same run. The server also checks the RSS every 3 h (`RSS_SYNC_HOURS`) to **detect** new streams; it never downloads or processes anything on its own.
+→ `200` with `{ "added": 3, "updated": 1, "total": 214, "full": true, "warnings": [] }`. `409 CHANNEL_NOT_CONFIGURED` if the workspace has no channel. Simultaneous calls for the same workspace share the same run. The server also checks the RSS of every workspace with a channel every 3 h (`RSS_SYNC_HOURS`) to **detect** new streams; it never downloads or processes anything on its own.
 
 ### `POST /api/episodes/:id/download`
 
@@ -289,6 +290,81 @@ Exports the saved `editState`: [intro] + enhanced audio without the cuts (short 
 
 ---
 
+## Workspaces
+
+A workspace (*espacio* in the UI) groups everything that belongs to one channel or congregation: its YouTube channel, episodes, curtains, podcast name and default curtains. The GPU, its queue, yt-dlp and the disk are shared.
+
+There is always at least one workspace. On the first start after upgrading, a migration creates one with all the existing data (from `YT_CHANNEL_ID` in `.env` if it's set). A fresh install starts with an empty "Mi espacio" with no channel.
+
+### `Workspace`
+
+```json
+{
+  "id": "w_k3m9qa",
+  "name": "Mi congregación",
+  "podcastName": "Mi podcast",
+  "channel": {
+    "id": "UCxxxxxxxxxxxxxxxxxxxxxx",
+    "title": "Mi canal",
+    "handle": "@mi-canal",
+    "url": "https://www.youtube.com/@mi-canal",
+    "streamsUrl": "https://www.youtube.com/@mi-canal/streams",
+    "avatarUrl": "https://yt3.ggpht.com/…"
+  },
+  "counts": { "episodes": 214, "youtube": 210, "withAudio": 12, "ready": 3 },
+  "isDefault": true,
+  "createdAt": "…",
+  "updatedAt": "…"
+}
+```
+
+| Field | Values |
+|---|---|
+| `channel` | `null` until a YouTube channel is connected. A channel can belong to only one workspace |
+| `podcastName` | Artist and album in the exported MP3's ID3 tags. Defaults to the workspace name |
+| `isDefault` | The oldest workspace. Used by any request that doesn't say which workspace |
+
+### Selecting the workspace
+
+Requests that list or create things take a `workspace` (id), as a query parameter, form field or JSON field. Without it, the default workspace is used, so older clients keep working:
+
+| Endpoint | How |
+|---|---|
+| `GET /api/episodes` · `GET /api/assets` | `?workspace=w_…` |
+| `GET /api/jobs` | `?workspace=w_…` lists only that workspace's jobs; without it, all of them |
+| `POST /api/episodes/sync` | `{ "workspace": "w_…", "full": true }` |
+| `POST /api/jobs` (upload) | `workspace` field, before the file. From the library, the episode's workspace is used |
+| `POST /api/assets` | `workspace` field, before the file |
+| `PUT /api/assets/defaults` | `{ "workspace": "w_…", "introId", "outroId" }` |
+
+`Episode`, `Job` and `Asset` include a `workspaceId` field. In the editor, the curtains must belong to the episode's workspace.
+
+The UI remembers the selected workspace per browser, so two people can work on different workspaces at the same time.
+
+### `GET /api/workspaces`
+
+→ `200` with `Workspace[]`, oldest first.
+
+### `POST /api/workspaces/resolve`
+
+Body: `{ "url": "…" }`. Any YouTube link (`@handle`, the `/streams` tab, `/channel/UC…`, or a video), or just `@handle` or `UC…`. Resolves it with yt-dlp (~2 s) so the UI can ask "is this the channel?".
+
+→ `200` with `{ "channel": { …as in Workspace }, "workspaceId": null }`. `workspaceId` is the workspace that already uses that channel, if any. Errors: `400 INVALID_REQUEST` (not a YouTube link), `404 CHANNEL_NOT_FOUND`, and the yt-dlp errors.
+
+### `POST /api/workspaces`
+
+Body: `{ "name": "…", "podcastName": "…", "channelUrl": "…" }` (`podcastName` and `channelUrl` are optional). → `201` with the `Workspace`. `409 CONFLICT` if the channel already belongs to another workspace. Owner only (guests get `404`).
+
+### `PATCH /api/workspaces/:id`
+
+Body: any of `{ "name", "podcastName", "channelUrl" }`. The channel can only be connected or changed while the workspace has no YouTube episodes (otherwise `409`: create a new workspace). → `200` with the `Workspace`. Owner only.
+
+### `DELETE /api/workspaces/:id`
+
+Deletes the workspace, its listed-only episodes and its curtains. → `204`. `409 CONFLICT` if it's the only workspace, or if any of its episodes has audio or an enhancement in progress (delete those first). Owner only.
+
+---
+
 ## Curtains (`Asset`)
 
 ```json
@@ -318,13 +394,11 @@ Shared by everyone using the app.
   "ffmpeg": { "installed": true, "version": "4.4.2-0ubuntu0.22.04.1" },
   "model": { "present": true },
   "disk": { "freeBytes": 221000000000, "totalBytes": 269000000000 },
-  "library": { "channelUrl": "https://www.youtube.com/@mi-canal/streams", "vodRetryMin": 30, "vodRetryMaxHours": 12, "rssSyncHours": 3 }
+  "library": { "vodRetryMin": 30, "vodRetryMaxHours": 12, "rssSyncHours": 3 }
 }
 ```
 
 `ytDlp.error`: when the binary exists but doesn't start, yt-dlp's real error (e.g. an unsupported Python version).
-
-`library.channelUrl` is `null` when no channel is configured.
 
 ### `POST /api/system/yt-dlp/update`
 
@@ -353,7 +427,8 @@ Every error uses the same shape:
 | 500 | `FFMPEG_MISSING` | ffmpeg or ffprobe is not installed on the server |
 | 500 | `WAVEFORM_FAILED` | The waveform couldn't be computed |
 | 507 | `DISK_FULL` | Not enough free disk space (~1.5 GB per hour of audio) |
-| 409 | `CHANNEL_NOT_CONFIGURED` | Syncing with YouTube without a channel configured (`YT_CHANNEL_ID` in `.env`) |
+| 409 | `CHANNEL_NOT_CONFIGURED` | Syncing a workspace that has no YouTube channel |
+| 404 | `CHANNEL_NOT_FOUND` | The link doesn't lead to a YouTube channel |
 | 500 | `YTDLP_MISSING` | yt-dlp is not installed (`npm run setup` installs it in `tools/bin/`) |
 | 502 | `YTDLP_FAILED` · `YTDLP_BLOCKED` · `NETWORK` · `SYNC_FAILED` | Syncing with YouTube failed. The message includes yt-dlp's real error |
 
@@ -377,7 +452,7 @@ Only exists while `npm run share` is running. Port 3000 behaves exactly as above
 
 ### What a guest sees
 
-- The library's YouTube episodes and the curtains are shared with guests (they can download, enhance, edit and export them). Uploaded episodes, like jobs, are private to whoever uploaded them. Only the owner can update yt-dlp.
+- Guests see every workspace and can switch between them. The library's YouTube episodes and the curtains are shared with guests (they can download, enhance, edit and export them). Uploaded episodes, like jobs, are private to whoever uploaded them. Only the owner can create, edit or delete workspaces and update yt-dlp.
 - Job lists, job details, actions, audio, waveforms and SSE events include **only that guest's jobs**. Another guest's job id answers `404 NOT_FOUND`, the same as an id that doesn't exist.
 - `GET /api/config` returns `"role": "guest"` and `"maxUploadMB": 95`, because Cloudflare's free plan rejects requests over 100 MB. The `413 TOO_LARGE` message suggests uploading an MP3.
 - At most 2 active jobs per guest (`429 TOO_MANY_JOBS`).

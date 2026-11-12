@@ -2,7 +2,9 @@
 
 Local **Node.js + Fastify** server (JavaScript, ES modules). It receives uploads, keeps a job queue in SQLite, runs the Python engine (`../engine/enhance_long.py`) one job at a time, and streams progress to the UI with Server-Sent Events.
 
-It also runs the **library**: it syncs the YouTube channel's streams, downloads their audio with yt-dlp, links every audio to its enhancement job, stores the editor state, and exports the final MP3 for Castbox with ffmpeg.
+It also runs the **library**: it syncs each workspace's YouTube channel, downloads stream audio with yt-dlp, links every audio to its enhancement job, stores the editor state, and exports the final MP3 for Castbox with ffmpeg.
+
+**Workspaces** (`workspaces.js`) group everything that belongs to one channel or congregation: its channel, episodes, curtains, podcast name and default curtains. They're a `workspace_id` column on `episodes`, `assets` and `jobs`; files stay where they are. There's always at least one. On startup, `ensureWorkspaces()` creates the first one if needed (with `YT_CHANNEL_ID` from `.env`, for older installs) and assigns it everything that has no workspace yet. Requests that don't say which workspace use the default (oldest) one.
 
 - HTTP contract: [`../docs/API.md`](../docs/API.md)
 - Guest access (`npm run share`): [`../docs/sharing.md`](../docs/sharing.md)
@@ -57,11 +59,12 @@ server/
 ├── waveform.js       waveform peaks via ffmpeg (1000 points, or 20/s for the editor), cached as JSON
 ├── static.js         file streaming with Range/HEAD; serves web/dist in production
 ├── share.js          secret link, signed cookie, 404 for everyone else
+├── workspaces.js     workspaces: API shape, first-start migration, create/edit/delete, channel resolution, default curtains
 ├── episodes.js       Episode model: file paths, API shape, visibility, SSE
 ├── library.js        episode lifecycle: downloads + VOD retry, jobs ↔ episodes, uploads, edit, export
 ├── tasks.js          non-GPU task queue (downloads, exports)
-├── ytdlp.js          yt-dlp: locate, version/update, list channel, metadata, download, error classification
-├── catalog.js        catalog sync: RSS + full /streams listing, upsert by video id
+├── ytdlp.js          yt-dlp: locate, version/update, resolve a channel from any link, list a channel, metadata, download, errors
+├── catalog.js        catalog sync per workspace: RSS + full /streams (or /videos) listing, upsert by video id
 ├── exporter.js       ffmpeg export: cuts + crossfades, curtains, two-pass loudnorm, MP3 CBR, ID3, checks
 ├── media.js          ffprobe, free disk, hard links
 ├── system.js         status for Settings (yt-dlp, ffmpeg, model, disk)
@@ -70,7 +73,8 @@ server/
     ├── jobs.js       list, upload (multipart) or from an episode (JSON), pause / resume / cancel / delete
     ├── audio.js      original / result audio (Range, ?download=1) and waveform
     ├── episodes.js   library: list, sync, download, retry, cancel, delete, audio, peaks, edit, export
-    ├── assets.js     curtains: upload, list, rename, delete, defaults, audio
+    ├── assets.js     curtains (per workspace): upload, list, rename, delete, defaults, audio
+    ├── workspaces.js list, resolve a channel link, create / edit / delete (owner only)
     └── system.js     health, config, events, system status, yt-dlp update
 ```
 
@@ -144,7 +148,8 @@ Upload:   the upload creates the episode and its Job ─────────
   5. Final measurement with `ebur128`, plus size and duration checks.
 
   About 2–3 minutes for an hour of audio.
-- **On first startup,** existing jobs get their episode once (hard links only).
+- **On first startup,** existing jobs get their episode once (hard links only), and everything goes into the first workspace.
+- **A video belongs to one workspace:** a channel can only be connected to one workspace, and syncing never moves an episode between workspaces. A workspace's channel can't be changed once it has episodes from it.
 
 ## Files on disk
 

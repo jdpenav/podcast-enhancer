@@ -1,4 +1,5 @@
-import { AudioWaveform, Library, Monitor, Moon, Settings, Sparkles, Sun, Thermometer } from 'lucide-react'
+import { AudioWaveform, ChevronsUpDown, Library, Monitor, Moon, Plus, Settings, Settings2, Sparkles, Sun, Thermometer } from 'lucide-react'
+import WorkspaceAvatar from './workspaces/WorkspaceAvatar.jsx'
 import { routeHref } from '../hooks/useRoute.js'
 import Menu from './ui/Menu.jsx'
 import Tooltip from './ui/Tooltip.jsx'
@@ -91,6 +92,48 @@ const NAV = [
   { key: 'settings', label: 'Ajustes', icon: Settings, href: routeHref.settings },
 ]
 
+/**
+ * Selector de espacio (canal / congregación). Cambiarlo solo afecta a este navegador.
+ * El dueño ve además "Nuevo espacio" y "Administrar espacios".
+ */
+function WorkspaceSwitcher({ workspaces, current, onSelect, onNew, canManage }) {
+  if (!current) return null
+  const items = [
+    ...workspaces.map((w) => ({
+      key: w.id,
+      label: w.name,
+      hint: w.channel ? (w.channel.handle ?? w.channel.title) : 'Sin canal de YouTube',
+      selected: w.id === current.id,
+      onSelect: () => onSelect(w.id),
+    })),
+    ...(canManage
+      ? [
+          { key: '__new', label: 'Nuevo espacio', icon: Plus, onSelect: onNew },
+          { key: '__manage', label: 'Administrar espacios', icon: Settings2, href: routeHref.settings },
+        ]
+      : []),
+  ]
+  return (
+    <Menu
+      label="Espacio"
+      items={items}
+      trigger={({ props }) => (
+        <button
+          type="button"
+          {...props}
+          aria-label={`Espacio: ${current.name}`}
+          title={`Espacio: ${current.name}`}
+          className="focus-ring inline-flex h-9 min-w-0 max-w-[13rem] items-center gap-2 rounded-full border border-neutral-200 bg-white pl-1 pr-1 text-[13px] font-medium transition-colors hover:bg-neutral-50 md:pr-2.5 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:bg-neutral-800"
+        >
+          <WorkspaceAvatar workspace={current} size={28} />
+          <span className="hidden truncate md:inline">{current.name}</span>
+          <ChevronsUpDown size={14} className="hidden shrink-0 text-neutral-400 md:inline" aria-hidden />
+        </button>
+      )}
+    />
+  )
+}
+
 /** Navegación principal. En pantallas angostas solo iconos (con nombre accesible). */
 function Nav({ route, libraryActive }) {
   const current = route?.name === 'editor' ? 'library' : route?.name
@@ -107,14 +150,14 @@ function Nav({ route, libraryActive }) {
             aria-label={n.label}
             title={n.label}
             className={cn(
-              'focus-ring relative inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors md:px-3',
+              'focus-ring relative inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors lg:px-3',
               active
                 ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
                 : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white',
             )}
           >
             <Icon size={15} aria-hidden />
-            <span className="hidden md:inline">{n.label}</span>
+            <span className="hidden lg:inline">{n.label}</span>
             {n.key === 'library' && libraryActive > 0 && (
               <span
                 className={cn('h-1.5 w-1.5 animate-pulse-dot rounded-full', active ? 'bg-white dark:bg-neutral-900' : 'bg-neutral-900 dark:bg-white')}
@@ -128,7 +171,7 @@ function Nav({ route, libraryActive }) {
   )
 }
 
-export default function Header({ health, connected, mock, queued, route, libraryActive = 0 }) {
+export default function Header({ health, connected, mock, queued, route, libraryActive = 0, workspaces = [], workspace, onSelectWorkspace, onNewWorkspace, canManage }) {
   return (
     <header className="sticky top-0 z-30 border-b border-neutral-200/70 bg-neutral-100/80 backdrop-blur-md dark:border-neutral-800/70 dark:bg-neutral-950/80">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
@@ -138,6 +181,7 @@ export default function Header({ health, connected, mock, queued, route, library
           </span>
           <span className="hidden text-[17px] font-semibold tracking-tight min-[480px]:inline">Enhance</span>
         </a>
+        <WorkspaceSwitcher workspaces={workspaces} current={workspace} onSelect={onSelectWorkspace} onNew={onNewWorkspace} canManage={canManage} />
         <Nav route={route} libraryActive={libraryActive} />
         {mock && (
           <Tooltip content="Sin backend: los datos son simulados">

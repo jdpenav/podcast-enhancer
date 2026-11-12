@@ -11,6 +11,7 @@ import { getWaveform } from '../waveform.js'
 import { freeBytes, probe } from '../media.js'
 import { newEpisodeId, visibleEpisode } from '../episodes.js'
 import { createJobFromEpisode, createUploadEpisode } from '../library.js'
+import { workspaceFrom } from '../workspaces.js'
 import { HttpError, cancel, kick, log, pause, remove, resume } from '../queue.js'
 
 /** Invitados: máximo GUEST_MAX_ACTIVE trabajos pending/processing/paused a la vez. */
@@ -28,7 +29,13 @@ export default async function jobRoutes(app) {
       ? `El archivo supera ${maxUploadMB} MB, el máximo para subir por internet. Sube el MP3 (1 h de audio pesa 30–80 MB).`
       : `El archivo supera el máximo de ${maxUploadMB} MB.`
 
-  app.get('/api/jobs', (req) => listJobs().filter((j) => canSee(req.viewer, j)).map(toApi))
+  // ?workspace=w_… → solo los trabajos de ese espacio; sin él, todos (la cola de la GPU es una sola)
+  app.get('/api/jobs', (req) => {
+    const ws = req.query.workspace ? workspaceFrom(req.query.workspace) : null
+    return listJobs()
+      .filter((j) => canSee(req.viewer, j) && (!ws || j.workspaceId === ws.id))
+      .map(toApi)
+  })
 
   app.get('/api/jobs/:id', (req) => toApi(visibleJob(req, req.params.id, getJob)))
 
@@ -67,7 +74,7 @@ export default async function jobRoutes(app) {
     }
     checkGuestLimit(req.viewer) // antes de recibir el archivo
 
-    let mode, quality, saved
+    let mode, quality, wsField, saved
     const cleanup = () => saved && fsp.rm(saved.dir, { recursive: true, force: true })
 
     try {
@@ -75,6 +82,7 @@ export default async function jobRoutes(app) {
         if (part.type === 'field') {
           if (part.fieldname === 'mode') mode = String(part.value)
           if (part.fieldname === 'quality') quality = String(part.value)
+          if (part.fieldname === 'workspace') wsField = String(part.value)
           continue
         }
         if (part.fieldname !== 'file' || saved) {
@@ -109,6 +117,7 @@ export default async function jobRoutes(app) {
 
     try {
       if (!saved) throw new HttpError(400, 'INVALID_FILE', 'No se recibió ningún archivo.')
+      const ws = workspaceFrom(wsField)
       const m = findMode(mode, mode === 'enhance' ? quality : null)
       if (!m || (mode === 'enhance' && !['standard', 'max'].includes(quality))) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Modo o calidad no válidos.')
@@ -139,6 +148,7 @@ export default async function jobRoutes(app) {
         activeSec: 0,
         owner: req.viewer?.owner ?? 'local',
         episodeId,
+        workspaceId: ws.id,
       })
       // Centralizar en la biblioteca (si fallara, el trabajo sigue igual)
       await createUploadEpisode(job, { episodeId }).catch((e) => {

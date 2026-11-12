@@ -51,6 +51,7 @@ export function toApi(job) {
         : null,
     guest: job.owner && job.owner !== 'local' ? job.owner : null,
     episodeId: job.episodeId ?? null,
+    workspaceId: job.workspaceId ?? null,
   }
 }
 

@@ -18,6 +18,8 @@ import jobRoutes from './routes/jobs.js'
 import audioRoutes from './routes/audio.js'
 import episodeRoutes from './routes/episodes.js'
 import assetRoutes from './routes/assets.js'
+import workspaceRoutes from './routes/workspaces.js'
+import { ensureWorkspaces } from './workspaces.js'
 import { initLibrary, stopLibrary } from './library.js'
 import { shutdownTasks } from './tasks.js'
 import { ytdlpVersion } from './ytdlp.js'
@@ -76,6 +78,7 @@ async function buildApp(role) {
   await app.register(audioRoutes)
   await app.register(episodeRoutes)
   await app.register(assetRoutes)
+  await app.register(workspaceRoutes)
   if (serveWeb) registerWebDist(app, WEB_DIST)
   return app
 }
@@ -109,6 +112,7 @@ async function cleanupDisk() {
 
 await recover()
 await cleanupDisk()
+await ensureWorkspaces() // antes de la biblioteca: todo debe tener espacio
 await initLibrary()
 
 // Herramientas externas: avisar claro al arrancar si falta algo (la app arranca igual)

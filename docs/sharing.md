@@ -115,6 +115,7 @@ The subdomain itself is public (it shows up in certificate logs); the key is wha
 | | You (`localhost:3000`) | Guests (link) |
 |---|---|---|
 | Jobs | All, with a "Guest" label on theirs | Only their own |
+| Workspaces | Create, edit, delete, switch | Switch only |
 | Library: YouTube streams | All | All (they can download, enhance, edit and export them) |
 | Library: uploaded audio | All, with a "Guest" label on theirs | Only their own |
 | Curtains (intro/outro) | Shared | Shared |

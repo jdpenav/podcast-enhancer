@@ -1,4 +1,4 @@
-// Cortinas (intro / outro): subir, listar, renombrar, borrar, escuchar y predeterminadas.
+// Cortinas (intro / outro) de cada espacio: subir, listar, renombrar, borrar, escuchar y predeterminadas.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -9,7 +9,8 @@ import { deleteAssetRow, getAsset, insertAsset, listAssets, updateAsset } from '
 import { HttpError } from '../errors.js'
 import { probe } from '../media.js'
 import { sendFile } from '../static.js'
-import { assetPath, getDefaults, setDefaults } from '../library.js'
+import { assetPath } from '../library.js'
+import { curtainDefaults, setCurtainDefaults, workspaceFrom } from '../workspaces.js'
 import { log } from '../log.js'
 
 const newAssetId = (() => {
@@ -19,6 +20,7 @@ const newAssetId = (() => {
 
 export const assetToApi = (a) => ({
   id: a.id,
+  workspaceId: a.workspaceId ?? null,
   name: a.name,
   filename: a.filename,
   durationSec: a.durationSec,
@@ -36,20 +38,27 @@ function mustGetAsset(id) {
 }
 
 export default async function assetRoutes(app) {
-  app.get('/api/assets', () => ({ items: listAssets().map(assetToApi), defaults: getDefaults() }))
+  app.get('/api/assets', (req) => {
+    const ws = workspaceFrom(req.query.workspace)
+    return { items: listAssets(ws.id).map(assetToApi), defaults: curtainDefaults(ws) }
+  })
 
-  app.put('/api/assets/defaults', (req) => setDefaults({ introId: req.body?.introId ?? null, outroId: req.body?.outroId ?? null }))
+  app.put('/api/assets/defaults', (req) =>
+    setCurtainDefaults(workspaceFrom(req.body?.workspace), { introId: req.body?.introId ?? null, outroId: req.body?.outroId ?? null }),
+  )
 
-  // multipart: "name" (opcional) y "file". Las cortinas son cortas: máximo MAX_ASSET_MB.
+  // multipart: "workspace" y "name" (opcionales, antes del archivo) y "file". Máximo MAX_ASSET_MB.
   app.post('/api/assets', async (req, reply) => {
     if (!req.isMultipart()) throw new HttpError(400, 'INVALID_FILE', 'Envía la cortina como multipart/form-data.')
     let name = ''
+    let wsField = ''
     let saved = null
     const cleanup = () => saved && fsp.rm(saved.tmp, { force: true })
     try {
       for await (const part of req.parts({ limits: { fileSize: MAX_ASSET_MB * 1024 * 1024 } })) {
         if (part.type === 'field') {
           if (part.fieldname === 'name') name = cleanName(part.value)
+          if (part.fieldname === 'workspace') wsField = String(part.value)
           continue
         }
         if (part.fieldname !== 'file' || saved) {
@@ -67,6 +76,7 @@ export default async function assetRoutes(app) {
         if (part.file.truncated) throw new HttpError(413, 'TOO_LARGE', `La cortina supera ${MAX_ASSET_MB} MB.`)
       }
       if (!saved) throw new HttpError(400, 'INVALID_FILE', 'No se recibió ningún archivo.')
+      const ws = workspaceFrom(wsField) // antes de mover el archivo: si el espacio no existe, no queda nada
       const durationSec = await probe(saved.tmp)
       if (!durationSec) throw new HttpError(400, 'INVALID_FILE', 'El archivo no es un audio válido o está dañado.')
       if (durationSec > 600) throw new HttpError(400, 'INVALID_FILE', 'Una cortina debe durar menos de 10 minutos.')
@@ -75,6 +85,7 @@ export default async function assetRoutes(app) {
       await fsp.rename(saved.tmp, assetPath(asset))
       const a = insertAsset({
         id: saved.id,
+        workspaceId: ws.id,
         name: name || saved.filename.replace(/\.[^.]+$/, ''),
         filename: saved.filename,
         ext: saved.ext,

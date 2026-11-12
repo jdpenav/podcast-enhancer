@@ -48,15 +48,16 @@ export const getWaveform = (id, which) => request(`/jobs/${id}/waveform?which=${
  * Sube el audio con XMLHttpRequest para tener progreso de subida (30–300 MB).
  * @param {File} file
  * @param {{mode: 'denoise'|'enhance', quality?: 'standard'|'max'}} opts
- * @param {{onProgress?: (fraction:number, loaded:number, total:number) => void, signal?: AbortSignal}} [extra]
+ * @param {{onProgress?: (fraction:number, loaded:number, total:number) => void, signal?: AbortSignal, workspace?: string}} [extra]
  * @returns {Promise<object>} Job creado (status "pending")
  */
-export function createJob(file, { mode, quality }, { onProgress, signal } = {}) {
+export function createJob(file, { mode, quality }, { onProgress, signal, workspace } = {}) {
   return new Promise((resolve, reject) => {
     const form = new FormData()
     // Campos antes del archivo: así el backend los lee antes de recibir el stream.
     form.append('mode', mode)
     if (mode === 'enhance' && quality) form.append('quality', quality)
+    if (workspace) form.append('workspace', workspace)
     form.append('file', file, file.name)
 
     const xhr = new XMLHttpRequest()
@@ -108,6 +109,8 @@ const SSE_EVENTS = {
   episodeProgress: 'onEpisodeProgress',
   episodeDeleted: 'onEpisodeDeleted',
   library: 'onLibrary',
+  workspace: 'onWorkspace',
+  workspaceDeleted: 'onWorkspaceDeleted',
 }
 let shared = null // { es, subs: Set<handlers> }
 
@@ -151,8 +154,9 @@ export function subscribeEvents(handlers) {
 // ---------------------------------------------------------------------------
 // Biblioteca (episodios)
 // ---------------------------------------------------------------------------
-export function listEpisodes({ status, q, source } = {}) {
+export function listEpisodes({ workspace, status, q, source } = {}) {
   const qs = new URLSearchParams()
+  if (workspace) qs.set('workspace', workspace)
   if (status) qs.set('status', status)
   if (q) qs.set('q', q)
   if (source) qs.set('source', source)
@@ -161,7 +165,7 @@ export function listEpisodes({ status, q, source } = {}) {
 }
 export const getEpisode = (id) => request(`/episodes/${id}`)
 export const renameEpisode = (id, title) => request(`/episodes/${id}`, { method: 'PATCH', body: { title } })
-export const syncEpisodes = ({ full = true } = {}) => request('/episodes/sync', { method: 'POST', body: { full } })
+export const syncEpisodes = ({ workspace, full = true } = {}) => request('/episodes/sync', { method: 'POST', body: { workspace, full } })
 export const downloadEpisode = (id) => request(`/episodes/${id}/download`, { method: 'POST' })
 export const retryEpisode = (id) => request(`/episodes/${id}/retry`, { method: 'POST' })
 export const cancelEpisode = (id) => request(`/episodes/${id}/cancel`, { method: 'POST' })
@@ -183,14 +187,16 @@ export const episodeDownloadUrl = (ep, which) => `${episodeAudioUrl(ep, which)}?
 // ---------------------------------------------------------------------------
 // Cortinas
 // ---------------------------------------------------------------------------
-export const listAssets = () => request('/assets')
+export const listAssets = (workspace) => request(`/assets${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''}`)
 export const renameAsset = (id, name) => request(`/assets/${id}`, { method: 'PATCH', body: { name } })
 export const deleteAsset = (id) => request(`/assets/${id}`, { method: 'DELETE' })
+/** defaults: { workspace, introId, outroId } */
 export const setAssetDefaults = (defaults) => request('/assets/defaults', { method: 'PUT', body: defaults })
 export const assetAudioUrl = (asset) => asset.url
 
-export function uploadAsset(file, name) {
+export function uploadAsset(file, name, workspace) {
   const form = new FormData()
+  if (workspace) form.append('workspace', workspace)
   if (name) form.append('name', name)
   form.append('file', file, file.name)
   return fetch(`${BASE}/assets`, { method: 'POST', body: form })
@@ -203,6 +209,16 @@ export function uploadAsset(file, name) {
       return data
     })
 }
+
+// ---------------------------------------------------------------------------
+// Espacios
+// ---------------------------------------------------------------------------
+export const listWorkspaces = () => request('/workspaces')
+/** Resuelve un enlace de YouTube: { channel, workspaceId } (workspaceId = espacio que ya lo usa). */
+export const resolveChannel = (url) => request('/workspaces/resolve', { method: 'POST', body: { url } })
+export const createWorkspace = (data) => request('/workspaces', { method: 'POST', body: data })
+export const updateWorkspace = (id, data) => request(`/workspaces/${id}`, { method: 'PATCH', body: data })
+export const deleteWorkspace = (id) => request(`/workspaces/${id}`, { method: 'DELETE' })
 
 // ---------------------------------------------------------------------------
 // Sistema

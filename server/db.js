@@ -1,5 +1,5 @@
 // Persistencia con better-sqlite3 (síncrono: simple y sin carreras).
-// Tablas: jobs (cola de la GPU), episodes (biblioteca), assets (cortinas), settings (clave/valor).
+// Tablas: workspaces (espacios), jobs (cola de la GPU), episodes (biblioteca), assets (cortinas), settings.
 import fs from 'node:fs'
 import Database from 'better-sqlite3'
 import { ASSETS_DIR, DATA_DIR, DB_PATH, EPISODES_DIR, JOBS_DIR } from './config.js'
@@ -66,6 +66,21 @@ db.exec(`
     created_at    TEXT NOT NULL
   );
 
+  -- Espacios: un canal / congregación con su biblioteca, cortinas y nombre de podcast
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id              TEXT PRIMARY KEY,   -- w_xxxxxx
+    name            TEXT NOT NULL,
+    podcast_name    TEXT,
+    channel_id      TEXT UNIQUE,        -- UC… (NULL = sin canal todavía)
+    channel_title   TEXT,
+    channel_handle  TEXT,
+    channel_avatar  TEXT,
+    streams_url     TEXT,
+    settings        TEXT,               -- JSON { curtainDefaults: { introId, outroId } }
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -77,6 +92,11 @@ const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map((c) => c.name)
 if (!jobCols.includes('owner')) db.exec("ALTER TABLE jobs ADD COLUMN owner TEXT NOT NULL DEFAULT 'local'")
 // episodio de la biblioteca al que pertenece el trabajo
 if (!jobCols.includes('episode_id')) db.exec('ALTER TABLE jobs ADD COLUMN episode_id TEXT')
+// espacio de cada cosa (NULL solo antes de la migración de workspaces.js)
+for (const t of ['jobs', 'episodes', 'assets']) {
+  if (!db.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'workspace_id')) db.exec(`ALTER TABLE ${t} ADD COLUMN workspace_id TEXT`)
+}
+db.exec('CREATE INDEX IF NOT EXISTS episodes_workspace ON episodes(workspace_id)')
 
 /**
  * Mapeo camelCase (código) ↔ snake_case (SQL) para una tabla.
@@ -127,7 +147,7 @@ const jobs = table(
     id: 'id', filename: 'filename', ext: 'ext', sizeBytes: 'size_bytes', durationSec: 'duration_sec',
     mode: 'mode', quality: 'quality', status: 'status', progress: 'progress', estimatedSec: 'estimated_sec',
     createdAt: 'created_at', startedAt: 'started_at', finishedAt: 'finished_at', error: 'error',
-    pid: 'pid', activeSec: 'active_sec', owner: 'owner', episodeId: 'episode_id',
+    pid: 'pid', activeSec: 'active_sec', owner: 'owner', episodeId: 'episode_id', workspaceId: 'workspace_id',
   },
   ['progress', 'error'],
 )
@@ -174,6 +194,7 @@ const episodes = table(
     durationSec: 'duration_sec', thumbnailUrl: 'thumbnail_url', position: 'position', status: 'status',
     sourceExt: 'source_ext', jobId: 'job_id', enhance: 'enhance', editState: 'edit_state', exportInfo: 'export_info',
     progress: 'progress', retry: 'retry', error: 'error', createdAt: 'created_at', updatedAt: 'updated_at',
+    workspaceId: 'workspace_id',
   },
   ['enhance', 'editState', 'exportInfo', 'progress', 'retry', 'error'],
 )
@@ -185,6 +206,9 @@ const epStmts = {
     ORDER BY COALESCE(published_at, created_at) DESC, IFNULL(position, 1e9) ASC`),
   byYoutube: db.prepare('SELECT * FROM episodes WHERE youtube_id = ?'),
   byStatus: db.prepare('SELECT * FROM episodes WHERE status = ? ORDER BY updated_at ASC'),
+  byWorkspace: db.prepare(`
+    SELECT * FROM episodes WHERE workspace_id = ?
+    ORDER BY COALESCE(published_at, created_at) DESC, IFNULL(position, 1e9) ASC`),
 }
 
 export const insertEpisode = (ep) => episodes.insert(ep)
@@ -194,6 +218,7 @@ export const deleteEpisodeRow = (id) => episodes.del(id)
 export const listEpisodes = () => epStmts.list.all().map(episodes.fromRow)
 export const episodeByYoutubeId = (yid) => episodes.fromRow(epStmts.byYoutube.get(yid))
 export const episodesByStatus = (s) => epStmts.byStatus.all(s).map(episodes.fromRow)
+export const episodesByWorkspace = (wsId) => epStmts.byWorkspace.all(wsId).map(episodes.fromRow)
 export const transaction = (fn) => db.transaction(fn)
 
 // ---------------------------------------------------------------------------
@@ -201,13 +226,59 @@ export const transaction = (fn) => db.transaction(fn)
 // ---------------------------------------------------------------------------
 const assets = table('assets', {
   id: 'id', name: 'name', filename: 'filename', ext: 'ext', sizeBytes: 'size_bytes', durationSec: 'duration_sec', createdAt: 'created_at',
+  workspaceId: 'workspace_id',
 })
-const listAssetsStmt = db.prepare('SELECT * FROM assets ORDER BY created_at DESC')
+const listAssetsStmt = db.prepare('SELECT * FROM assets WHERE workspace_id = ? ORDER BY created_at DESC')
 export const insertAsset = (a) => assets.insert(a)
 export const getAsset = (id) => assets.get(id)
 export const updateAsset = (id, patch) => assets.update(id, patch)
 export const deleteAssetRow = (id) => assets.del(id)
-export const listAssets = () => listAssetsStmt.all().map(assets.fromRow)
+export const listAssets = (wsId) => listAssetsStmt.all(wsId).map(assets.fromRow)
+
+// ---------------------------------------------------------------------------
+// workspaces
+// ---------------------------------------------------------------------------
+const workspaces = table(
+  'workspaces',
+  {
+    id: 'id', name: 'name', podcastName: 'podcast_name', channelId: 'channel_id', channelTitle: 'channel_title',
+    channelHandle: 'channel_handle', channelAvatar: 'channel_avatar', streamsUrl: 'streams_url', settings: 'settings',
+    createdAt: 'created_at', updatedAt: 'updated_at',
+  },
+  ['settings'],
+)
+const wsStmts = {
+  list: db.prepare('SELECT * FROM workspaces ORDER BY created_at ASC, id ASC'),
+  byChannel: db.prepare('SELECT * FROM workspaces WHERE channel_id = ?'),
+  counts: db.prepare(`
+    SELECT workspace_id AS ws, COUNT(*) AS episodes,
+           SUM(CASE WHEN source = 'youtube' THEN 1 ELSE 0 END) AS youtube,
+           SUM(CASE WHEN source_ext IS NOT NULL THEN 1 ELSE 0 END) AS withAudio,
+           SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready
+    FROM episodes GROUP BY workspace_id`),
+  assignAll: {
+    episodes: db.prepare('UPDATE episodes SET workspace_id = ? WHERE workspace_id IS NULL'),
+    assets: db.prepare('UPDATE assets SET workspace_id = ? WHERE workspace_id IS NULL'),
+    jobs: db.prepare('UPDATE jobs SET workspace_id = ? WHERE workspace_id IS NULL'),
+  },
+  moveJobs: db.prepare('UPDATE jobs SET workspace_id = ? WHERE workspace_id = ?'),
+  deleteBare: db.prepare("DELETE FROM episodes WHERE workspace_id = ? AND source_ext IS NULL AND status IN ('discovered', 'error', 'youtube_processing')"),
+}
+export const insertWorkspace = (w) => workspaces.insert(w)
+export const getWorkspace = (id) => workspaces.get(id)
+export const updateWorkspaceRow = (id, patch) => workspaces.update(id, { ...patch, updatedAt: new Date().toISOString() })
+export const deleteWorkspaceRow = (id) => workspaces.del(id)
+export const listWorkspaces = () => wsStmts.list.all().map(workspaces.fromRow)
+export const workspaceByChannel = (channelId) => workspaces.fromRow(wsStmts.byChannel.get(channelId))
+/** Conteos por espacio: Map(wsId → { episodes, youtube, withAudio, ready }). */
+export const workspaceCounts = () =>
+  new Map(wsStmts.counts.all().map((r) => [r.ws, { episodes: r.episodes, youtube: r.youtube ?? 0, withAudio: r.withAudio ?? 0, ready: r.ready ?? 0 }]))
+/** Migración: todo lo que no tiene espacio pasa a `wsId`. Devuelve cuántas filas se movieron por tabla. */
+export const assignOrphansTo = (wsId) =>
+  transaction(() => Object.fromEntries(Object.entries(wsStmts.assignAll).map(([t, st]) => [t, st.run(wsId).changes])))()
+export const moveJobsToWorkspace = (fromId, toId) => wsStmts.moveJobs.run(toId, fromId).changes
+/** Borra los episodios del espacio que solo están listados (sin audio). */
+export const deleteBareEpisodes = (wsId) => wsStmts.deleteBare.run(wsId).changes
 
 // ---------------------------------------------------------------------------
 // settings (clave → JSON)

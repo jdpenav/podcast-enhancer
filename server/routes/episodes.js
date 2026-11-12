@@ -1,7 +1,8 @@
 // Rutas de la biblioteca: listar, sincronizar con YouTube, descargar, reintentar, cancelar,
 // eliminar, audio (Range), picos del editor, estado de edición y exportación.
 import { STATUSES, canSeeEpisode, epFiles, episodeToApi, hasEnhanced, hasFinal, hasSource, visibleEpisode } from '../episodes.js'
-import { listEpisodes } from '../db.js'
+import { episodesByWorkspace } from '../db.js'
+import { workspaceFrom } from '../workspaces.js'
 import { HttpError } from '../errors.js'
 import { sendFile } from '../static.js'
 import { attachment } from './audio.js'
@@ -26,6 +27,7 @@ const normalize = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(
 export default async function episodeRoutes(app) {
   app.get('/api/episodes', (req) => {
     const { status, q, source } = req.query
+    const ws = workspaceFrom(req.query.workspace)
     let statuses = null
     if (status) {
       statuses = String(status)
@@ -34,7 +36,7 @@ export default async function episodeRoutes(app) {
       if (!statuses.length) throw new HttpError(400, 'INVALID_REQUEST', 'Estado no válido.')
     }
     const needle = q ? normalize(String(q).trim()) : ''
-    return listEpisodes()
+    return episodesByWorkspace(ws.id)
       .filter((ep) => canSeeEpisode(req.viewer, ep))
       .filter((ep) => !statuses || statuses.includes(ep.status))
       .filter((ep) => !source || ep.source === source)
@@ -52,8 +54,9 @@ export default async function episodeRoutes(app) {
 
   app.post('/api/episodes/sync', async (req) => {
     const full = req.body?.full !== false
+    const ws = workspaceFrom(req.body?.workspace)
     try {
-      return await syncCatalog({ full })
+      return await syncCatalog(ws, { full })
     } catch (e) {
       if (e instanceof HttpError) throw e
       if (e instanceof YtError) {

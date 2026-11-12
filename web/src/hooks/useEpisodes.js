@@ -7,6 +7,8 @@ function reducer(state, action) {
   switch (action.type) {
     case 'set':
       return { ...state, loaded: true, episodes: action.episodes }
+    case 'reset':
+      return { episodes: [], loaded: false }
     case 'upsert': {
       const exists = state.episodes.some((e) => e.id === action.episode.id)
       const episodes = exists
@@ -24,11 +26,14 @@ function reducer(state, action) {
 }
 
 /**
- * Biblioteca en vivo: carga inicial (GET /api/episodes) y luego cambios por SSE.
+ * Biblioteca en vivo del espacio actual: carga inicial (GET /api/episodes?workspace=) y luego
+ * cambios por SSE (los de otros espacios se ignoran).
  * `onTransition(episode, prevStatus)` se llama cuando un episodio cambia de estado (para avisos).
  */
-export function useEpisodes(api, { onTransition } = {}) {
+export function useEpisodes(api, workspaceId, { onTransition } = {}) {
   const [state, dispatch] = useReducer(reducer, { episodes: [], loaded: false })
+  const wsRef = useRef(workspaceId)
+  wsRef.current = workspaceId
   const ref = useRef(state.episodes)
   ref.current = state.episodes
   const transitionRef = useRef(onTransition)
@@ -42,12 +47,14 @@ export function useEpisodes(api, { onTransition } = {}) {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!api) return
-    dispatch({ type: 'set', episodes: await api.listEpisodes() })
-  }, [api])
+    if (!api || !workspaceId) return
+    const episodes = await api.listEpisodes({ workspace: workspaceId })
+    if (wsRef.current === workspaceId) dispatch({ type: 'set', episodes }) // ignorar respuestas de otro espacio
+  }, [api, workspaceId])
 
   useEffect(() => {
-    if (!api) return
+    if (!api || !workspaceId) return
+    dispatch({ type: 'reset' })
     let alive = true
     let hadError = false
     let retry
@@ -57,10 +64,10 @@ export function useEpisodes(api, { onTransition } = {}) {
       })
     initial()
     const close = api.subscribeEvents({
-      onEpisode: (ep) => upsert(ep),
+      onEpisode: (ep) => ep.workspaceId === workspaceId && upsert(ep),
       onEpisodeProgress: ({ id, progress }) => dispatch({ type: 'progress', id, progress }),
       onEpisodeDeleted: ({ id }) => dispatch({ type: 'remove', id }),
-      onLibrary: () => refresh().catch(() => {}),
+      onLibrary: (e) => (!e?.workspaceId || e.workspaceId === workspaceId) && refresh().catch(() => {}),
       onOpen: () => {
         if (hadError) refresh().catch(() => {})
         hadError = false
@@ -74,7 +81,7 @@ export function useEpisodes(api, { onTransition } = {}) {
       clearTimeout(retry)
       close()
     }
-  }, [api, refresh, upsert])
+  }, [api, workspaceId, refresh, upsert])
 
   // Acciones: devuelven el Episode actualizado (o lanzan ApiError)
   const actions = {
@@ -90,7 +97,7 @@ export function useEpisodes(api, { onTransition } = {}) {
     saveEdit: async (id, editState) => upsert(await api.saveEpisodeEdit(id, editState)),
     export: async (id) => upsert(await api.exportEpisode(id)),
     sync: async (opts) => {
-      const r = await api.syncEpisodes(opts)
+      const r = await api.syncEpisodes({ ...opts, workspace: workspaceId })
       await refresh()
       return r
     },

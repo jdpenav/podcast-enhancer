@@ -4,6 +4,7 @@ import DropOverlay from './components/DropOverlay.jsx'
 import ConfigModal from './components/ConfigModal.jsx'
 import ResultModal from './components/ResultModal.jsx'
 import LibraryPicker from './components/library/LibraryPicker.jsx'
+import WorkspaceDialog from './components/workspaces/WorkspaceDialog.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
 import EnhanceView from './views/EnhanceView.jsx'
 import LibraryView from './views/LibraryView.jsx'
@@ -14,6 +15,7 @@ import { useApi } from './hooks/useApi.js'
 import { useConfig } from './hooks/useConfig.js'
 import { useJobs } from './hooks/useJobs.js'
 import { useEpisodes } from './hooks/useEpisodes.js'
+import { useWorkspaces } from './hooks/useWorkspaces.js'
 import { useNotify } from './hooks/useNotify.js'
 import { useWindowDrop } from './hooks/useWindowDrop.js'
 import { useNow } from './hooks/useNow.js'
@@ -23,8 +25,8 @@ import { baseName, extOf, formatTimeOfDay } from './lib/format.js'
 import { counts as countJobs, queueSec } from './lib/jobs.js'
 
 /**
- * Armazón de la app: datos en vivo (trabajos + biblioteca), cabecera con navegación,
- * la vista según la ruta y los modales compartidos (procesar audio, escuchar resultado).
+ * Armazón de la app: datos en vivo (espacios, trabajos y biblioteca del espacio actual), cabecera con
+ * navegación, la vista según la ruta y los modales compartidos (procesar audio, escuchar, espacio).
  */
 export default function App() {
   const loaded = useApi()
@@ -40,6 +42,11 @@ export default function App() {
   const [pending, setPending] = useState(null)
   const [picking, setPicking] = useState(false)
   const [unseenDone, setUnseenDone] = useState(false)
+  const [wsDialog, setWsDialog] = useState(null) // { workspace: null (nuevo) | Workspace (editar) }
+
+  const spaces = useWorkspaces(api)
+  const workspace = spaces.current
+  const canManage = config?.role === 'owner'
 
   const editEpisode = useCallback((id) => navigate(routeHref.editor(id)), [])
 
@@ -87,7 +94,32 @@ export default function App() {
   )
 
   const { jobs, loaded: jobsLoaded, health, connected, actions } = useJobs(api, { onTransition: onJobTransition })
-  const library = useEpisodes(api, { onTransition: onEpisodeTransition })
+  const library = useEpisodes(api, workspace?.id, { onTransition: onEpisodeTransition })
+  // Mejorar muestra los trabajos del espacio actual; la cola de la GPU (estimaciones) es una sola
+  const jobsHere = useMemo(() => jobs.filter((j) => !j.workspaceId || j.workspaceId === workspace?.id), [jobs, workspace?.id])
+  const othersQueued = jobs.filter((j) => j.workspaceId && j.workspaceId !== workspace?.id && ['pending', 'processing'].includes(j.status)).length
+
+  const selectWorkspace = useCallback(
+    (id) => {
+      spaces.actions.select(id)
+      if (route.name === 'editor') navigate(routeHref.library) // el episodio abierto es del otro espacio
+    },
+    [spaces.actions, route.name],
+  )
+
+  // Enlace directo al editor de un episodio de otro espacio: cambiar a ese espacio
+  useEffect(() => {
+    if (route.name !== 'editor' || !api || !library.loaded || !workspace) return
+    if (library.episodes.some((e) => e.id === route.id)) return
+    let alive = true
+    api
+      .getEpisode(route.id)
+      .then((ep) => alive && ep.workspaceId && ep.workspaceId !== workspace.id && spaces.actions.select(ep.workspaceId))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [route, api, library.loaded, library.episodes, workspace]) // eslint-disable-line react-hooks/exhaustive-deps
   const c = useMemo(() => countJobs(jobs), [jobs])
   const waitSec = useMemo(() => queueSec(jobs), [jobs])
   const resultJob = jobs.find((j) => j.id === resultId && j.status === 'done') ?? null
@@ -132,7 +164,7 @@ export default function App() {
       actions.added(job)
       toast({ tone: 'info', title: 'Añadido a la cola', description: pending.episode.title, action: route.name !== 'enhance' ? { label: 'Ver', onClick: () => navigate(routeHref.enhance) } : undefined })
     } else {
-      const job = await api.createJob(pending.file, choice, opts)
+      const job = await api.createJob(pending.file, choice, { ...opts, workspace: workspace?.id })
       actions.added(job)
       toast({ tone: 'info', title: 'Añadido a la cola', description: job.filename })
     }
@@ -180,14 +212,28 @@ export default function App() {
 
   return (
     <div className="min-h-dvh">
-      <Header health={health} connected={connected} mock={loaded?.mock} queued={c.pending} route={route} libraryActive={libraryActive} />
+      <Header
+        health={health}
+        connected={connected}
+        mock={loaded?.mock}
+        queued={c.pending}
+        route={route}
+        libraryActive={libraryActive}
+        workspaces={spaces.workspaces}
+        workspace={workspace}
+        onSelectWorkspace={selectWorkspace}
+        onNewWorkspace={() => setWsDialog({ workspace: null })}
+        canManage={canManage}
+      />
       <OfflineBanner visible={connected === false && !loaded?.mock} />
 
       {route.name === 'enhance' && (
         <EnhanceView
           api={api}
           config={config}
-          jobs={jobs}
+          jobs={jobsHere}
+          allJobs={jobs}
+          othersQueued={othersQueued}
           jobsLoaded={jobsLoaded}
           counts={c}
           waitSec={waitSec}
@@ -207,6 +253,9 @@ export default function App() {
           library={library}
           jobs={jobs}
           now={now}
+          workspace={workspace}
+          canManage={canManage}
+          onConnectChannel={() => setWsDialog({ workspace })}
           onEnhance={(episode) => setPending({ episode })}
           onEdit={(ep) => editEpisode(ep.id)}
         />
@@ -224,9 +273,35 @@ export default function App() {
           onEnhance={(episode) => setPending({ episode })}
         />
       )}
-      {route.name === 'settings' && <SettingsView api={api} config={config} mock={loaded?.mock} />}
+      {route.name === 'settings' && (
+        <SettingsView
+          api={api}
+          config={config}
+          mock={loaded?.mock}
+          spaces={spaces}
+          workspace={workspace}
+          canManage={canManage}
+          onSelectWorkspace={selectWorkspace}
+          onNewWorkspace={() => setWsDialog({ workspace: null })}
+          onEditWorkspace={(w) => setWsDialog({ workspace: w })}
+        />
+      )}
 
       <DropOverlay visible={dragging} />
+
+      <WorkspaceDialog
+        open={!!wsDialog}
+        workspace={wsDialog?.workspace ?? null}
+        workspaces={spaces.workspaces}
+        actions={spaces.actions}
+        onClose={() => setWsDialog(null)}
+        onSaved={(w) => {
+          if (!wsDialog?.workspace) {
+            selectWorkspace(w.id) // recién creado: pasar a él
+            toast({ tone: 'success', title: 'Espacio creado', description: w.channel ? `${w.name}: sincroniza la Biblioteca para traer sus directos.` : w.name })
+          }
+        }}
+      />
 
       <LibraryPicker
         open={picking}

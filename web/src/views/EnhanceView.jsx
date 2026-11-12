@@ -18,7 +18,7 @@ const FILTERS = {
  * Pantalla de inicio: subir un audio (o elegirlo de la biblioteca), la cola de trabajos de la GPU
  * y el resumen. Es el dashboard original, sin cambios de comportamiento.
  */
-export default function EnhanceView({ api, config, jobs, jobsLoaded, counts, waitSec, health, now, actions, onFiles, onPickLibrary, onListen, onEdit }) {
+export default function EnhanceView({ api, config, jobs, allJobs = jobs, othersQueued = 0, jobsLoaded, counts, waitSec, health, now, actions, onFiles, onPickLibrary, onListen, onEdit }) {
   const toast = useToast()
   const [confirm, setConfirm] = useState(null) // { kind, job }
   const [filter, setFilter] = useState('all')
@@ -81,6 +81,11 @@ export default function EnhanceView({ api, config, jobs, jobsLoaded, counts, wai
             <div className="flex min-h-9 items-center justify-between gap-3">
               <h2 id="jobs-title" className="text-sm font-semibold">
                 Trabajos {jobs.length > 0 && <span className="font-normal text-neutral-400">· {jobs.length}</span>}
+                {othersQueued > 0 && (
+                  <span className="ml-2 font-normal text-neutral-500 dark:text-neutral-400" title="La GPU es una sola: estos trabajos van antes o después de los tuyos">
+                    +{othersQueued} de otros espacios en la cola
+                  </span>
+                )}
               </h2>
               {showFilter && (
                 <Segmented
@@ -114,7 +119,7 @@ export default function EnhanceView({ api, config, jobs, jobsLoaded, counts, wai
                   job={job}
                   api={api}
                   now={now}
-                  queue={job.status === 'pending' ? { ahead: jobsAhead(jobs, job), finishSec: finishInSec(jobs, job) } : null}
+                  queue={job.status === 'pending' ? { ahead: jobsAhead(allJobs, job), finishSec: finishInSec(allJobs, job) } : null}
                   onAction={onAction}
                   onListen={onListen}
                   onEdit={onEdit}

@@ -1,5 +1,5 @@
 // GET /api/health · GET /api/config · GET /api/events (SSE) · GET /api/system · POST /api/system/yt-dlp/update
-import { ACCEPTED_TYPES, DEFAULT_PRESET, PODCAST_NAME, PRESET_LIMITS } from '../config.js'
+import { ACCEPTED_TYPES, DEFAULT_PRESET, PRESET_LIMITS } from '../config.js'
 import { HttpError } from '../errors.js'
 import { systemStatus } from '../system.js'
 import { updateYtdlp, YtError } from '../ytdlp.js'
@@ -19,7 +19,6 @@ export default async function systemRoutes(app) {
     maxUploadMB: app.limits.maxUploadMB,
     acceptedTypes: ACCEPTED_TYPES,
     role: app.limits.role,
-    podcastName: PODCAST_NAME,
     exportPreset: DEFAULT_PRESET,
     presetLimits: PRESET_LIMITS,
   }))

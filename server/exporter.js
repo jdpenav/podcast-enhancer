@@ -7,7 +7,7 @@
 //   - Una sola codificación con pérdida al final: MP3 CBR (no VBR: duración y búsqueda fiables).
 import fsp from 'node:fs/promises'
 import { spawn } from 'node:child_process'
-import { CASTBOX_MAX_BYTES, DEFAULT_PRESET, PODCAST_NAME, PRESET_LIMITS } from './config.js'
+import { CASTBOX_MAX_BYTES, DEFAULT_PRESET, PRESET_LIMITS } from './config.js'
 import { probeAudio } from './media.js'
 
 export class ExportError extends Error {
@@ -179,7 +179,7 @@ async function measureFile(file, { signal, onTime }) {
 /**
  * Exporta. Parámetros:
  *   enhancedPath, outPath, cuts, intro/outro ({ path, durationSec, name } o null),
- *   preset (parcial), meta ({ title, date }), signal, onProgress(percent, stage)
+ *   preset (parcial), meta ({ title, date, podcastName }), signal, onProgress(percent, stage)
  * Devuelve el resumen que se guarda en el episodio (export).
  */
 export async function exportAudio({ enhancedPath, outPath, cuts, intro, outro, preset: rawPreset, meta, signal, onProgress }) {
@@ -232,8 +232,8 @@ export async function exportAudio({ enhancedPath, outPath, cuts, intro, outro, p
         '-map_metadata', '-1',
         '-id3v2_version', '3', '-write_id3v1', '0',
         '-metadata', `title=${meta.title}`,
-        '-metadata', `artist=${PODCAST_NAME}`,
-        '-metadata', `album=${PODCAST_NAME}`,
+        '-metadata', `artist=${meta.podcastName ?? 'Podcast'}`,
+        '-metadata', `album=${meta.podcastName ?? 'Podcast'}`,
         '-metadata', 'genre=Podcast',
         ...(year ? ['-metadata', `date=${year}`] : []),
         '-f', 'mp3', tmp,

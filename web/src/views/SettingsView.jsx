@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, Cpu, Download, HardDrive, Loader2, Music, Pause, Pencil, Play, RefreshCw, Trash2, Upload, Wrench, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Cpu, Download, ExternalLink, HardDrive, Loader2, Music, Pause, Pencil, Play, Plus, RefreshCw, Trash2, Upload, Wrench, XCircle, Youtube } from 'lucide-react'
+import Badge from '../components/ui/Badge.jsx'
+import WorkspaceAvatar from '../components/workspaces/WorkspaceAvatar.jsx'
 import Button from '../components/ui/Button.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import Tooltip from '../components/ui/Tooltip.jsx'
@@ -117,14 +119,7 @@ function SystemCard({ api, config }) {
             <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-neutral-100 p-3 font-mono text-[11px] text-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-300">{output}</pre>
           )}
           <p className="mt-3 border-t border-neutral-100 pt-3 text-[12px] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-            {sys.library.channelUrl ? (
-              <>
-                Canal: <a href={sys.library.channelUrl} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{sys.library.channelUrl.replace('https://www.', '')}</a>
-              </>
-            ) : (
-              <>Canal de YouTube: sin configurar (YT_CHANNEL_ID en el archivo .env)</>
-            )}
-            {' · '}Si un stream recién terminado aún no se puede descargar, se reintenta cada {sys.library.vodRetryMin} min durante {sys.library.vodRetryMaxHours} h.
+            Si un stream recién terminado aún no se puede descargar, se reintenta cada {sys.library.vodRetryMin} min durante {sys.library.vodRetryMaxHours} h.
           </p>
         </>
       )}
@@ -132,8 +127,106 @@ function SystemCard({ api, config }) {
   )
 }
 
+/** Espacios: uno por canal o congregación. El dueño los crea, edita y elimina. */
+function WorkspacesCard({ spaces, workspace, canManage, onSelect, onNew, onEdit }) {
+  const toast = useToast()
+  const [confirm, setConfirm] = useState(null)
+  const lastConfirm = useRef(null)
+  if (confirm) lastConfirm.current = confirm
+  const cf = confirm ?? lastConfirm.current
+
+  const doDelete = async () => {
+    try {
+      await spaces.actions.remove(confirm.id)
+      toast({ title: 'Espacio eliminado', description: confirm.name })
+    } catch (e) {
+      toast({ tone: 'error', title: 'No se pudo eliminar', description: e.message, duration: 9000 })
+      throw e
+    }
+  }
+
+  return (
+    <section className="card p-5" aria-label="Espacios">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Espacios</h2>
+          <p className="mt-0.5 text-[13px] text-neutral-500 dark:text-neutral-400">
+            Uno por canal o congregación, cada uno con su biblioteca y sus cortinas. Cambias de espacio desde el menú de arriba.
+          </p>
+        </div>
+        {canManage && (
+          <Button variant="primary" size="sm" icon={Plus} onClick={onNew}>
+            Nuevo
+          </Button>
+        )}
+      </div>
+      <ul className="mt-3 divide-y divide-neutral-100 dark:divide-neutral-800">
+        {spaces.workspaces.map((w) => {
+          const active = w.id === workspace?.id
+          return (
+            <li key={w.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+              <WorkspaceAvatar workspace={w} size={36} />
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 truncate text-sm font-medium">
+                  <span className="truncate">{w.name}</span>
+                  {active && <Badge tone="dark">Actual</Badge>}
+                </p>
+                <p className="flex flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-neutral-500 dark:text-neutral-400">
+                  {w.channel ? (
+                    <a href={w.channel.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline-offset-2 hover:underline">
+                      <Youtube size={12} aria-hidden /> {w.channel.handle ?? w.channel.title}
+                      <ExternalLink size={11} aria-hidden />
+                    </a>
+                  ) : (
+                    <span>Sin canal de YouTube</span>
+                  )}
+                  <span aria-hidden>·</span>
+                  <span>
+                    {w.counts.episodes} {w.counts.episodes === 1 ? 'episodio' : 'episodios'}
+                    {w.counts.withAudio > 0 && ` · ${w.counts.withAudio} con audio`}
+                    {w.counts.ready > 0 && ` · ${w.counts.ready} listos`}
+                  </span>
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                {!active && (
+                  <Button size="sm" onClick={() => onSelect(w.id)}>
+                    Usar
+                  </Button>
+                )}
+                {canManage && (
+                  <>
+                    <Tooltip content="Editar">
+                      <Button variant="ghost" size="icon-sm" icon={Pencil} onClick={() => onEdit(w)} aria-label={`Editar ${w.name}`} />
+                    </Tooltip>
+                    {spaces.workspaces.length > 1 && (
+                      <Tooltip content="Eliminar">
+                        <Button variant="ghost" size="icon-sm" icon={Trash2} onClick={() => setConfirm(w)} aria-label={`Eliminar ${w.name}`} />
+                      </Tooltip>
+                    )}
+                  </>
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+
+      <ConfirmModal
+        open={!!confirm}
+        danger
+        title="¿Eliminar este espacio?"
+        description={`Se borran «${cf?.name}», sus cortinas y su lista de episodios. Solo se puede si ningún episodio tiene audio descargado, mejorado o exportado: bórralos antes desde la Biblioteca.`}
+        confirmLabel="Eliminar espacio"
+        onConfirm={doDelete}
+        onClose={() => setConfirm(null)}
+      />
+    </section>
+  )
+}
+
 /** Cortinas: subir, escuchar, renombrar, borrar y elegir las predeterminadas. */
-function AssetsCard({ api, config }) {
+function AssetsCard({ api, config, workspace }) {
   const toast = useToast()
   const [data, setData] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -145,9 +238,11 @@ function AssetsCard({ api, config }) {
   const inputRef = useRef(null)
   const audio = useRef(null)
 
+  const wsId = workspace?.id
   const load = useCallback(() => {
-    api?.listAssets().then(setData).catch((e) => toast({ tone: 'error', title: 'No se pudieron cargar las cortinas', description: e.message }))
-  }, [api, toast])
+    if (!api || !wsId) return
+    api.listAssets(wsId).then(setData).catch((e) => toast({ tone: 'error', title: 'No se pudieron cargar las cortinas', description: e.message }))
+  }, [api, wsId, toast])
   useEffect(load, [load])
   useEffect(() => () => audio.current?.pause(), [])
 
@@ -170,7 +265,7 @@ function AssetsCard({ api, config }) {
     }
     setUploading(true)
     try {
-      const a = await api.uploadAsset(file)
+      const a = await api.uploadAsset(file, undefined, wsId)
       toast({ tone: 'success', title: 'Cortina añadida', description: a.name })
       load()
     } catch (e) {
@@ -195,7 +290,7 @@ function AssetsCard({ api, config }) {
   const setDefault = async (kind, id) => {
     const d = { ...data.defaults, [kind]: data.defaults[kind] === id ? null : id }
     try {
-      const defaults = await api.setAssetDefaults(d)
+      const defaults = await api.setAssetDefaults({ ...d, workspace: wsId })
       setData((x) => ({ ...x, defaults }))
     } catch (e) {
       toast({ tone: 'error', title: 'No se pudo guardar', description: e.message })
@@ -237,8 +332,10 @@ function AssetsCard({ api, config }) {
     <section className="card p-5" aria-label="Cortinas">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Cortinas</h2>
-          <p className="mt-0.5 text-[13px] text-neutral-500 dark:text-neutral-400">La música de entrada y salida que se pega al exportar.</p>
+          <h2 className="text-sm font-semibold">
+            Cortinas {workspace && <span className="font-normal text-neutral-400">· {workspace.name}</span>}
+          </h2>
+          <p className="mt-0.5 text-[13px] text-neutral-500 dark:text-neutral-400">La música de entrada y salida que se pega al exportar. Cada espacio tiene las suyas.</p>
         </div>
         <Button variant="primary" size="sm" icon={Upload} onClick={() => inputRef.current?.click()} loading={uploading}>
           Subir
@@ -328,14 +425,20 @@ function AssetsCard({ api, config }) {
   )
 }
 
-export default function SettingsView({ api, config }) {
+export default function SettingsView({ api, config, spaces, workspace, canManage, onSelectWorkspace, onNewWorkspace, onEditWorkspace }) {
+  // Conteos de episodios al día al abrir Ajustes
+  useEffect(() => {
+    spaces.actions.refresh().catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <main className="mx-auto max-w-3xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Ajustes</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Cortinas del podcast y estado de las herramientas.</p>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Espacios, cortinas del podcast y estado de las herramientas.</p>
       </div>
-      <AssetsCard api={api} config={config} />
+      <WorkspacesCard spaces={spaces} workspace={workspace} canManage={canManage} onSelect={onSelectWorkspace} onNew={onNewWorkspace} onEdit={onEditWorkspace} />
+      <AssetsCard key={workspace?.id} api={api} config={config} workspace={workspace} />
       <SystemCard api={api} config={config} />
     </main>
   )

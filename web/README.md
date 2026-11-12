@@ -4,7 +4,9 @@ Single-page app for Enhancer, with three sections in the header:
 
 - **Mejorar** (home): upload audio or pick it from the library, follow progress live, compare the result with the original, and download it.
 - **Biblioteca:** every audio in one place (streams from the church's YouTube channel and uploads), with its status and next step: download → enhance → edit → export.
-- **Ajustes:** curtains (intro/outro) and system status (yt-dlp, ffmpeg, model, disk).
+- **Ajustes:** workspaces, curtains (intro/outro) and system status (yt-dlp, ffmpeg, model, disk).
+
+A **workspace switcher** in the header picks the channel or congregation everything refers to (library, curtains, the jobs listed in *Mejorar*). The choice is stored per browser (`localStorage`).
 
 The **editor** (`#/editor/<id>`) adds the intro and outro, marks cuts on the waveform and exports the MP3 for Castbox.
 
@@ -54,6 +56,7 @@ Both expose the same interface. The mock simulates the queue, progress, pausing,
 | `/#/biblioteca` | Library with episodes in every state; downloading and exporting are simulated in a few seconds |
 | An episode with "privado" in its title | Fails to download with `VIDEO_UNAVAILABLE` |
 | `/#/editor/yt_demo3` | Editor with cuts and curtains (plays the 60 s sample audio) |
+| Workspace menu → *Sede sur* | A second workspace with no channel: connect one (any `@handle`) and sync to get three sample streams |
 
 ## Features
 
@@ -88,6 +91,11 @@ Both expose the same interface. The mock simulates the queue, progress, pausing,
   - Intro/outro pickers (remembered as defaults) and the final structure with its duration.
   - Export preset "Castbox (voice)" with advanced options; live progress; summary with duration, size, loudness and Castbox checks; player and download.
   - Autosaves the edit state on the server.
+- **Workspaces:**
+  - Switcher in the header; *New workspace* and *Manage* for the owner.
+  - Create/edit dialog: paste any channel or video link, confirm the channel by its name and picture, name the workspace and its podcast.
+  - Settings lists every workspace with its channel and counts; delete is blocked while it holds audio.
+  - Opening a link to an episode of another workspace switches to it.
 - Responsive down to 400 px and keyboard accessible.
 
 ## Design
@@ -112,12 +120,13 @@ web/
     ├── main.jsx, App.jsx  App.jsx: shell (live data, header, route, shared modals)
     ├── api/               client.js (real), mock.js, index.js (picks one)
     ├── views/             EnhanceView (home), LibraryView, EditorView, SettingsView
-    ├── hooks/             useJobs, useEpisodes, useRoute, useConfig, useApi, useNotify, useNow,
+    ├── hooks/             useJobs, useEpisodes, useWorkspaces, useRoute, useConfig, useApi, useNotify, useNow,
     │                      useWindowDrop, useTheme, useIsDark
     ├── components/        Header, UploadCard, DropOverlay, ConfigModal, JobCard, Sidebar,
     │   │                  ResultModal, AudioPlayer, Waveform, ConfirmModal, EmptyState, OfflineBanner
     │   ├── library/       EpisodeRow, LibraryPicker
     │   ├── editor/        WaveEditor (wavesurfer), EditorPanels (structure, curtains, cuts, preset)
+    │   ├── workspaces/    WorkspaceAvatar, WorkspaceDialog (create/edit, "is this the channel?")
     │   └── ui/            Badge, Button, Menu, Modal, ProgressBar, Segmented, Toast, Tooltip
     └── lib/               format, audio, jobs, episodes, cn
 ```
