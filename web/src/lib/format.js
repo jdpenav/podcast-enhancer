@@ -82,3 +82,41 @@ export function extOf(filename = '') {
   const m = filename.toLowerCase().match(/\.[^.]+$/)
   return m ? m[0] : ''
 }
+
+const dateFmt = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: 'numeric' })
+const dateFmtShort = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short' })
+
+/** Fecha: "9 nov 2026" (o "9 nov" si es del año en curso y `short`). */
+export function formatDate(iso, { short = false } = {}) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return short && d.getFullYear() === new Date().getFullYear() ? dateFmtShort.format(d) : dateFmt.format(d)
+}
+
+/** Velocidad: "2,4 MB/s". */
+export function formatSpeed(bps) {
+  return Number.isFinite(bps) && bps > 0 ? `${formatBytes(bps)}/s` : ''
+}
+
+/** Tiempo editable con décimas: 252.4 → "4:12.4", 3725.25 → "1:02:05.3". */
+export function formatTimecode(sec) {
+  if (!Number.isFinite(sec) || sec < 0) sec = 0
+  const tenths = Math.round(sec * 10)
+  const whole = Math.floor(tenths / 10)
+  return `${formatClock(whole)}.${tenths % 10}`
+}
+
+/**
+ * Interpreta lo que el usuario escribe: "00:04:12", "4:12.5", "252", "1:02:05".
+ * Devuelve segundos o null si no es válido.
+ */
+export function parseTimecode(text) {
+  const t = String(text ?? '').trim().replace(',', '.')
+  if (!/^\d+(:\d{1,2}){0,2}(\.\d+)?$/.test(t)) return null
+  const [main, frac = ''] = t.split('.')
+  const parts = main.split(':').map(Number)
+  if (parts.slice(1).some((p) => p >= 60)) return null
+  const secs = parts.reduce((acc, p) => acc * 60 + p, 0)
+  return secs + (frac ? Number(`0.${frac}`) : 0)
+}

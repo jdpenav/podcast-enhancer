@@ -185,7 +185,11 @@ def main():
 
     chunk_len = int(SR * args.chunk_seconds)
     hop_len = chunk_len - int(SR * args.overlap_seconds)
-    starts = list(range(0, dwav.shape[-1], hop_len))
+    # Un último trozo que cae dentro del solapamiento ya está cubierto por el anterior (que llega hasta
+    # s + overlap >= final). Si se procesara, podría medir unas pocas muestras y torch.stft fallaría
+    # ("Padding size should be less than the corresponding input dimension") según la duración del audio.
+    n = dwav.shape[-1]
+    starts = [s for s in range(0, n, hop_len) if s == 0 or n - s > chunk_len - hop_len]
     groups = [starts[i : i + args.group_size] for i in range(0, len(starts), args.group_size)]
     done_before = sum((parts / f"g{gi:04d}.pt").exists() for gi in range(len(groups)))
     print(

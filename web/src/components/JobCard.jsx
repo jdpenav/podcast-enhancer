@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Scissors,
   Sparkles,
   Trash2,
   UserRound,
@@ -90,9 +91,10 @@ function Thumb({ status }) {
  * Tarjeta de un trabajo.
  * - onAction(kind, job): 'pause' | 'resume' | 'cancel' | 'delete' → Promise
  * - onListen(job)
+ * - onEdit(job): abrir el editor del episodio (cortinas, cortes, exportar)
  * - queue: { ahead, finishSec } para pendientes/procesando
  */
-export default function JobCard({ job, api, now, queue, onAction, onListen, showGuest = false }) {
+export default function JobCard({ job, api, now, queue, onAction, onListen, onEdit, showGuest = false }) {
   const [busy, setBusy] = useState(null) // acción en curso
   const [flash, setFlash] = useState(false)
   const prevStatus = useRef(job.status)
@@ -245,6 +247,11 @@ export default function JobCard({ job, api, now, queue, onAction, onListen, show
             <Button variant="primary" icon={Headphones} onClick={() => onListen(job)}>
               Escuchar
             </Button>
+            {onEdit && job.episodeId && (
+              <Button icon={Scissors} onClick={() => onEdit(job)}>
+                Editar y exportar
+              </Button>
+            )}
             <DownloadMenu job={job} api={api} />
           </>
         )}

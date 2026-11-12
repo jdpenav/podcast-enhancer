@@ -1,4 +1,5 @@
-import { AudioWaveform, Monitor, Moon, Sun, Thermometer } from 'lucide-react'
+import { AudioWaveform, Library, Monitor, Moon, Settings, Sparkles, Sun, Thermometer } from 'lucide-react'
+import { routeHref } from '../hooks/useRoute.js'
 import Menu from './ui/Menu.jsx'
 import Tooltip from './ui/Tooltip.jsx'
 import { useTheme } from '../hooks/useTheme.js'
@@ -84,16 +85,60 @@ function ThemeMenu() {
   )
 }
 
-export default function Header({ health, connected, mock, queued }) {
+const NAV = [
+  { key: 'enhance', label: 'Mejorar', icon: Sparkles, href: routeHref.enhance },
+  { key: 'library', label: 'Biblioteca', icon: Library, href: routeHref.library },
+  { key: 'settings', label: 'Ajustes', icon: Settings, href: routeHref.settings },
+]
+
+/** Navegación principal. En pantallas angostas solo iconos (con nombre accesible). */
+function Nav({ route, libraryActive }) {
+  const current = route?.name === 'editor' ? 'library' : route?.name
+  return (
+    <nav aria-label="Secciones" className="flex items-center gap-1 rounded-full border border-neutral-200 bg-white p-1 dark:border-neutral-800 dark:bg-neutral-900">
+      {NAV.map((n) => {
+        const active = current === n.key
+        const Icon = n.icon
+        return (
+          <a
+            key={n.key}
+            href={n.href}
+            aria-current={active ? 'page' : undefined}
+            aria-label={n.label}
+            title={n.label}
+            className={cn(
+              'focus-ring relative inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium transition-colors md:px-3',
+              active
+                ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white',
+            )}
+          >
+            <Icon size={15} aria-hidden />
+            <span className="hidden md:inline">{n.label}</span>
+            {n.key === 'library' && libraryActive > 0 && (
+              <span
+                className={cn('h-1.5 w-1.5 animate-pulse-dot rounded-full', active ? 'bg-white dark:bg-neutral-900' : 'bg-neutral-900 dark:bg-white')}
+                aria-label={`${libraryActive} en curso`}
+              />
+            )}
+          </a>
+        )
+      })}
+    </nav>
+  )
+}
+
+export default function Header({ health, connected, mock, queued, route, libraryActive = 0 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-neutral-200/70 bg-neutral-100/80 backdrop-blur-md dark:border-neutral-800/70 dark:bg-neutral-950/80">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
-        <a href="/" className="focus-ring flex items-center gap-2.5 rounded-xl" aria-label="Enhance, inicio">
+        <a href={routeHref.enhance} className="focus-ring flex shrink-0 items-center gap-2.5 rounded-xl" aria-label="Enhance, inicio">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
             <AudioWaveform size={19} strokeWidth={2.25} />
           </span>
-          <span className="text-[17px] font-semibold tracking-tight">Enhance</span>
+          <span className="hidden text-[17px] font-semibold tracking-tight min-[480px]:inline">Enhance</span>
         </a>
+        <Nav route={route} libraryActive={libraryActive} />
         {mock && (
           <Tooltip content="Sin backend: los datos son simulados">
             <span
@@ -106,7 +151,7 @@ export default function Header({ health, connected, mock, queued }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           {queued > 0 && (
-            <span className="hidden text-[13px] text-neutral-500 sm:inline dark:text-neutral-400">
+            <span className="hidden text-[13px] text-neutral-500 lg:inline dark:text-neutral-400">
               {queued} en cola
             </span>
           )}

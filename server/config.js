@@ -10,7 +10,9 @@ if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE)
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? path.join(ROOT, 'data'))
 export const JOBS_DIR = path.join(DATA_DIR, 'jobs')
 export const DB_PATH = path.join(DATA_DIR, 'jobs.db')
-export const WEB_DIST = path.join(ROOT, 'web/dist')
+export const EPISODES_DIR = path.join(DATA_DIR, 'episodes')
+export const ASSETS_DIR = path.join(DATA_DIR, 'assets')
+export const WEB_DIST = path.resolve(process.env.WEB_DIST ?? path.join(ROOT, 'web/dist'))
 
 export const PYTHON = process.env.PYTHON ?? path.join(ROOT, 'venv/bin/python')
 export const ENGINE = process.env.ENGINE_PATH ?? path.join(ROOT, 'engine/enhance_long.py')
@@ -56,5 +58,49 @@ export const MODES = [
 export const CALIBRATION_MIN_DURATION_SEC = 300
 export const CALIBRATION_SAMPLES = 5
 
+// ---------------------------------------------------------------------------
+// Biblioteca (Feature 1): canal de YouTube y descargas con yt-dlp
+// ---------------------------------------------------------------------------
+// yt-dlp: YTDLP=ruta, o tools/bin/yt-dlp (lo instala npm run setup), o el del PATH
+export const YTDLP_LOCAL = path.join(ROOT, 'tools/bin/yt-dlp')
+export const YTDLP_ENV = process.env.YTDLP ?? null
+// Canal de YouTube de la biblioteca: se configura en .env (ver .env.example). Sin canal, la biblioteca
+// funciona igual con los audios subidos; solo "Sincronizar con YouTube" pide configurarlo.
+export const YT_CHANNEL_ID = process.env.YT_CHANNEL_ID?.trim() || null
+export const YT_STREAMS_URL =
+  process.env.YT_STREAMS_URL?.trim() || (YT_CHANNEL_ID ? `https://www.youtube.com/channel/${YT_CHANNEL_ID}/streams` : null)
+// Revisión automática del RSS (solo detecta streams nuevos; nunca descarga ni procesa sola). 0 = desactivada
+export const RSS_SYNC_HOURS = Number(process.env.RSS_SYNC_HOURS ?? 3)
+// Stream recién terminado que YouTube todavía procesa: reintentar cada N min, hasta M horas
+export const VOD_RETRY_MIN = Number(process.env.VOD_RETRY_MIN ?? 30)
+export const VOD_RETRY_MAX_HOURS = Number(process.env.VOD_RETRY_MAX_HOURS ?? 12)
+
+// ---------------------------------------------------------------------------
+// Editor y exportación (Feature 2)
+// ---------------------------------------------------------------------------
+export const PODCAST_NAME = process.env.PODCAST_NAME?.trim() || 'Podcast' // artista y álbum en las etiquetas ID3
+export const PEAKS_PER_SEC = 20 // resolución de la onda del editor (1200 picos por minuto)
+export const CASTBOX_MAX_BYTES = 400 * 1024 * 1024
+export const MAX_ASSET_MB = 50
+/** Preajuste "Castbox (voz)": MP3 CBR mono 44,1 kHz, -16 LUFS / -1 dBTP. */
+export const DEFAULT_PRESET = {
+  name: 'castbox',
+  bitrateKbps: 128,
+  channels: 1,
+  sampleRate: 44100,
+  lufs: -16,
+  truePeak: -1,
+  cutCrossfadeMs: 20, // unión entre segmentos al quitar cortes (evita chasquidos)
+  curtainFadeSec: 0, // 0 = corte seco entre cortina y contenido
+}
+export const PRESET_LIMITS = {
+  bitrateKbps: [64, 96, 128, 160, 192, 256, 320],
+  channels: [1, 2],
+  lufs: [-24, -12],
+  cutCrossfadeMs: [0, 200],
+  curtainFadeSec: [0, 5],
+}
+
+export const episodeDir = (id) => path.join(EPISODES_DIR, id)
 export const jobDir = (id) => path.join(JOBS_DIR, id)
 export const workDir = (id) => path.join(JOBS_DIR, id, 'work')

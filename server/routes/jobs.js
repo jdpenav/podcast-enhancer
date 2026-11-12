@@ -1,45 +1,17 @@
-// Rutas de trabajos: crear (subida), listar, consultar, pausar, reanudar, cancelar, eliminar.
+// Rutas de trabajos: crear (subida o desde la biblioteca), listar, consultar, pausar, reanudar, cancelar, eliminar.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { ACCEPTED_TYPES, DATA_DIR, GUEST_MAX_ACTIVE, MIN_FREE_BYTES, MIN_FREE_BYTES_PER_SEC, jobDir } from '../config.js'
+import { ACCEPTED_TYPES, GUEST_MAX_ACTIVE, MIN_FREE_BYTES, MIN_FREE_BYTES_PER_SEC, jobDir } from '../config.js'
 import { canSee, factorFor, files, findMode, newJobId, toApi, visibleJob } from '../jobs.js'
-import { activeCountByOwner, getJob, insertJob, listJobs } from '../db.js'
+import { activeCountByOwner, getJob, insertJob, listJobs, updateJob } from '../db.js'
 import { broadcast } from '../events.js'
 import { getWaveform } from '../waveform.js'
+import { freeBytes, probe } from '../media.js'
+import { newEpisodeId, visibleEpisode } from '../episodes.js'
+import { createJobFromEpisode, createUploadEpisode } from '../library.js'
 import { HttpError, cancel, kick, log, pause, remove, resume } from '../queue.js'
-
-const run = promisify(execFile)
-
-/** Duración con ffprobe; null si no es un audio válido. */
-async function probe(file) {
-  try {
-    const { stdout } = await run(
-      'ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', file],
-      { timeout: 30_000 },
-    )
-    const info = JSON.parse(stdout)
-    const hasAudio = info.streams?.some((s) => s.codec_type === 'audio')
-    const duration = Number(info.format?.duration)
-    return hasAudio && duration > 0 ? duration : null
-  } catch (e) {
-    if (e.code === 'ENOENT') throw new HttpError(500, 'FFMPEG_MISSING', 'Falta ffmpeg en el servidor. Instálalo con: sudo apt install ffmpeg')
-    return null
-  }
-}
-
-async function freeBytes() {
-  try {
-    const s = await fsp.statfs(DATA_DIR)
-    return s.bavail * s.bsize
-  } catch {
-    return Infinity
-  }
-}
 
 /** Invitados: máximo GUEST_MAX_ACTIVE trabajos pending/processing/paused a la vez. */
 function checkGuestLimit(viewer) {
@@ -80,9 +52,19 @@ export default async function jobRoutes(app) {
     return reply.code(204).send()
   })
 
-  // Subida multipart: campos "mode", "quality" (si enhance) y "file". Se escribe a disco en streaming.
+  // Dos formas:
+  //  - JSON { episodeId, mode, quality }: mejorar un audio que ya está en la biblioteca.
+  //  - multipart con "mode", "quality" (si enhance) y "file": subida (se escribe a disco en streaming).
+  //    Cada subida crea también su episodio en la biblioteca.
   app.post('/api/jobs', async (req, reply) => {
-    if (!req.isMultipart()) throw new HttpError(400, 'INVALID_FILE', 'Envía el audio como multipart/form-data.')
+    if (!req.isMultipart()) {
+      const { episodeId, mode, quality } = req.body ?? {}
+      if (!episodeId) throw new HttpError(400, 'INVALID_FILE', 'Envía el audio como multipart/form-data, o un episodeId de la biblioteca.')
+      const ep = visibleEpisode(req, String(episodeId))
+      checkGuestLimit(req.viewer)
+      const job = await createJobFromEpisode(ep, { mode: String(mode ?? ''), quality: quality ? String(quality) : undefined }, req.viewer)
+      return reply.code(201).send(toApi(job))
+    }
     checkGuestLimit(req.viewer) // antes de recibir el archivo
 
     let mode, quality, saved
@@ -141,6 +123,7 @@ export default async function jobRoutes(app) {
       }
 
       await fsp.rename(saved.tmp, path.join(saved.dir, `original${saved.ext}`))
+      const episodeId = newEpisodeId()
       const job = insertJob({
         id: saved.id,
         filename: saved.filename,
@@ -155,6 +138,12 @@ export default async function jobRoutes(app) {
         createdAt: new Date().toISOString(),
         activeSec: 0,
         owner: req.viewer?.owner ?? 'local',
+        episodeId,
+      })
+      // Centralizar en la biblioteca (si fallara, el trabajo sigue igual)
+      await createUploadEpisode(job, { episodeId }).catch((e) => {
+        log(`episodio de ${job.id}: ${e.message}`)
+        Object.assign(job, updateJob(job.id, { episodeId: null }))
       })
       log(`+ ${job.id} "${job.filename}" ${(sizeBytes / 1e6).toFixed(1)} MB, ${Math.round(durationSec)} s, ${mode}${quality && mode === 'enhance' ? '/' + quality : ''}`)
       broadcast('job', toApi(job), job.owner)

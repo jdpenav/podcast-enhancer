@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Clock, FileAudio, Loader2, Sparkles, Wind } from 'lucide-react'
+import { Check, Clock, FileAudio, Library, Loader2, Sparkles, Wind } from 'lucide-react'
 import Modal from './ui/Modal.jsx'
 import Button from './ui/Button.jsx'
 import Segmented from './ui/Segmented.jsx'
@@ -86,12 +86,13 @@ function ModeOption({ selected, onSelect, icon: Icon, title, description, estima
 }
 
 /**
- * Elegir modo y subir.
+ * Elegir modo y subir (archivo) o encolar (audio de la biblioteca).
+ * - file: archivo a subir · episode: episodio de la biblioteca (no hay subida).
  * - durationSec: undefined = leyendo, null = desconocida, número = segundos.
  * - waitSec: segundos de cola por delante (para "listo hacia las …").
  * - onSubmit(choice, { onProgress, signal }) → Promise<Job>
  */
-export default function ConfigModal({ open, file, durationSec, config, waitSec = 0, aheadCount = 0, onSubmit, onClose }) {
+export default function ConfigModal({ open, file, episode, durationSec, config, waitSec = 0, aheadCount = 0, onSubmit, onClose }) {
   const [choice, setChoice] = useState(loadChoice)
   const [upload, setUpload] = useState(null) // { fraction, loaded, total } mientras sube
   const [error, setError] = useState(null)
@@ -103,7 +104,7 @@ export default function ConfigModal({ open, file, durationSec, config, waitSec =
       setUpload(null)
       setError(null)
     }
-  }, [open, file])
+  }, [open, file, episode])
 
   const uploading = upload !== null
   const est = (mode, quality) => estimateFor(config, durationSec, mode, quality)
@@ -113,7 +114,8 @@ export default function ConfigModal({ open, file, durationSec, config, waitSec =
 
   const submit = async () => {
     setError(null)
-    setUpload({ fraction: 0, loaded: 0, total: file.size })
+    // Desde la biblioteca no hay subida: directo a "registrando en la cola"
+    setUpload(episode ? { fraction: 1, loaded: 0, total: 0 } : { fraction: 0, loaded: 0, total: file.size })
     const ctrl = new AbortController()
     abortRef.current = ctrl
     saveChoice(choice)
@@ -134,6 +136,7 @@ export default function ConfigModal({ open, file, durationSec, config, waitSec =
     if (uploading) abortRef.current?.abort()
     else onClose()
   }
+  const fromLibrary = !!episode && !file
 
   const finishing = uploading && upload.fraction >= 1
 
@@ -145,13 +148,41 @@ export default function ConfigModal({ open, file, durationSec, config, waitSec =
       title="Procesar audio"
       footer={
         <>
-          <Button onClick={cancel}>{uploading ? 'Cancelar subida' : 'Cancelar'}</Button>
+          <Button onClick={cancel} disabled={uploading && fromLibrary}>
+            {uploading && !fromLibrary ? 'Cancelar subida' : 'Cancelar'}
+          </Button>
           <Button variant="primary" onClick={submit} loading={uploading} disabled={!config}>
-            {uploading ? 'Subiendo…' : 'Procesar'}
+            {uploading ? (fromLibrary ? 'Añadiendo…' : 'Subiendo…') : 'Procesar'}
           </Button>
         </>
       }
     >
+      {fromLibrary && (
+        <div className="mb-5 flex items-center gap-3 rounded-2xl bg-neutral-100 p-3 dark:bg-neutral-800/60">
+          {episode.thumbnailUrl ? (
+            <img src={episode.thumbnailUrl} alt="" className="h-10 w-[72px] shrink-0 rounded-lg object-cover" />
+          ) : (
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-neutral-700 shadow-sm dark:bg-neutral-900 dark:text-neutral-200">
+              <FileAudio size={19} />
+            </span>
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" title={episode.title}>
+              {episode.title}
+            </p>
+            <p className="flex items-center gap-1.5 text-[13px] tabular-nums text-neutral-500 dark:text-neutral-400">
+              <Library size={12} aria-hidden /> De la biblioteca
+              {Number.isFinite(durationSec) && (
+                <>
+                  <span aria-hidden>·</span>
+                  {formatClock(durationSec)}
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
       {file && (
         <div className="mb-5 flex items-center gap-3 rounded-2xl bg-neutral-100 p-3 dark:bg-neutral-800/60">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-neutral-700 shadow-sm dark:bg-neutral-900 dark:text-neutral-200">
@@ -213,9 +244,11 @@ export default function ConfigModal({ open, file, durationSec, config, waitSec =
           <div className="animate-fade-in space-y-2">
             <div className="flex items-baseline justify-between text-[13px]">
               <span className="font-medium">{finishing ? 'Registrando en la cola…' : 'Subiendo copia del audio…'}</span>
-              <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
-                {Math.round(upload.fraction * 100)} % · {formatBytes(upload.loaded)} de {formatBytes(upload.total)}
-              </span>
+              {!fromLibrary && (
+                <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
+                  {Math.round(upload.fraction * 100)} % · {formatBytes(upload.loaded)} de {formatBytes(upload.total)}
+                </span>
+              )}
             </div>
             <ProgressBar value={upload.fraction * 100} shimmer={finishing} label="Progreso de subida" />
           </div>
